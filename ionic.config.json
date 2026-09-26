@@ -1,0 +1,7 @@
+{
+  "name": "biombo-arena",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
