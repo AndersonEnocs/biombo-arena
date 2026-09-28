@@ -8,11 +8,10 @@ type BallExitAnimation = {
   mesh: THREE.Mesh;
   startAt: number;
   duration: number;
-  from: THREE.Vector3;
-  to: THREE.Vector3;
   curve: THREE.CatmullRomCurve3;
-  wobble: number;
-  spin: THREE.Vector3;
+  targetSlotPos: THREE.Vector3;
+  ballNumber: number;
+  hasSettled: boolean;
 };
 
 type AgitationBallState = {
@@ -46,18 +45,18 @@ export class BiomboEngineService {
   private agitationBalls: THREE.Mesh[] = [];
   private agitationBallStates: AgitationBallState[] = [];
   private lastAgitationFrame = 0;
-  private readonly shuffleDurationMs = 10000;
-  private readonly rotationCenter = new THREE.Vector3(0, 0, 0)
+  private readonly shuffleDurationMs = 8000;
+  private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
 
   private readonly agitationPalette = [
-    0x6ae8ff,
-    0x81f7ff,
-    0xf5d76e,
-    0xff9ae5,
-    0xa8ff9e,
-    0x99b5ff,
-    0xffb66b,
-    0xc8a3ff,
+    0x00d2ff, // Azul cian
+    0xffd200, // Amarillo brillante
+    0xff3b6f, // Rosa magenta (como bola 10 del video)
+    0x00e676, // Verde lima
+    0xffffff, // Blanco perla
+    0x9c27b0, // Púrpura
+    0xff9100, // Naranja
+    0x3d5afe, // Azul cobalto
   ];
 
   private readonly rapierLoader = inject(RapierLoaderService);
@@ -105,7 +104,7 @@ export class BiomboEngineService {
         probeCanvas.getContext('experimental-webgl');
 
       if (!probeContext) {
-        throw new Error('Tu navegador o el entorno actual no soportan WebGL. Activa aceleración por hardware o usa un navegador compatible.');
+        throw new Error('Tu navegador o el entorno actual no soportan WebGL.');
       }
 
       this.renderer = new THREE.WebGLRenderer({
@@ -118,32 +117,32 @@ export class BiomboEngineService {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.2;
+      this.renderer.toneMappingExposure = 1.25;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
       container.replaceChildren(this.renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
       this.scene.add(ambientLight);
 
-      const mainLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      const mainLight = new THREE.DirectionalLight(0xffffff, 1.9);
       mainLight.position.set(15, 30, 25);
       mainLight.castShadow = true;
       this.scene.add(mainLight);
 
-      const rimLightLeft = new THREE.PointLight(0x70a0ff, 15, 80);
+      const rimLightLeft = new THREE.PointLight(0x70a0ff, 18, 80);
       rimLightLeft.position.set(-25, 10, 10);
       this.scene.add(rimLightLeft);
 
-      const rimLightRight = new THREE.PointLight(0xffffff, 10, 80);
+      const rimLightRight = new THREE.PointLight(0xffffff, 12, 80);
       rimLightRight.position.set(25, -10, 15);
       this.scene.add(rimLightRight);
 
       const glassMaterial = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         metalness: 0.05,
-        roughness: 0.05,
+        roughness: 0.04,
         transmission: 0.94,
         thickness: 1.0,
         transparent: true,
@@ -170,14 +169,14 @@ export class BiomboEngineService {
       const neonRingMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         emissive: 0xffffff,
-        emissiveIntensity: 3.0,
+        emissiveIntensity: 3.5,
         roughness: 0.2,
       });
 
       const rampMaterial = new THREE.MeshStandardMaterial({
         color: 0x111317,
-        metalness: 0.7,
-        roughness: 0.4,
+        metalness: 0.75,
+        roughness: 0.35,
       });
 
       const [hollow, ornaments, ramp] = await Promise.all([
@@ -209,7 +208,7 @@ export class BiomboEngineService {
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
-      this.buildExitRail();
+
       this.ngZone.runOutsideAngular(() => this.animate());
       this.isReady.set(true);
     } catch (err: any) {
@@ -225,35 +224,25 @@ export class BiomboEngineService {
 
     const totalBalls = this.agitationBalls.length;
     const ballRadius = this.agitationBallStates[0]?.radius || 0.95;
-    const minDist = ballRadius * 2.05; // Margen para que no choquen
+    const minDist = ballRadius * 2.05;
 
-    // ⭐ AJUSTE DE ALTURA REAL:
-    // El fondo de la esfera de cristal está en torno a Y = -10.
-    // Con -9.1 la bola central queda apoyada exactamente sobre el vidrio interior.
-    let bowlCenterY = -9.1;
-
-    // Si la esfera está cargada, calculamos su cota mínima exacta:
+    // Altura calculada en la base interior del cristal
+    let bowlCenterY = -8.5;
     if (this.solids['hollow']?.mesh) {
       const box = new THREE.Box3().setFromObject(this.solids['hollow'].mesh);
-      // Apoyo = suelo del cristal + radio de la bola + holgura de pared
-      bowlCenterY = box.min.y + ballRadius + 0.35;
+      bowlCenterY = box.min.y + ballRadius + 0.45;
     }
 
-    // Curvatura esférica más suave (0.052 para esfera de radio ~9.5)
-    // Esto hace que las bolas se extiendan a lo ancho del cuenco y no queden en torre
     const bowlCurvature = 0.052;
-
-    // 1. Distribución en espiral concéntrica en el fondo del cuenco
     const positions: THREE.Vector3[] = [];
     let currentLayer = 0;
     let ballsInCurrentLayer = 0;
-    let maxInLayer = 1; // Bola 0 en el centro del fondo
+    let maxInLayer = 1;
 
     for (let i = 0; i < totalBalls; i++) {
       if (ballsInCurrentLayer >= maxInLayer) {
         currentLayer++;
         ballsInCurrentLayer = 0;
-        // Más bolas por anillo para llenar la base primero
         maxInLayer = Math.min(6 * currentLayer, 18);
       }
 
@@ -263,12 +252,9 @@ export class BiomboEngineService {
       } else {
         const angle = (ballsInCurrentLayer / maxInLayer) * Math.PI * 2 + (currentLayer * 0.55);
         const radiusDist = currentLayer * (minDist * 0.9);
-
         const x = Math.cos(angle) * radiusDist;
         const z = Math.sin(angle) * radiusDist;
-        // Altura parabólica según la concavidad del vidrio
         const y = bowlCenterY + (radiusDist * radiusDist * bowlCurvature) + (currentLayer * 0.32);
-
         pos = new THREE.Vector3(x, y, z);
       }
 
@@ -276,7 +262,6 @@ export class BiomboEngineService {
       ballsInCurrentLayer++;
     }
 
-    // 2. Relajación física (25 iteraciones: separa esferas y las gravedad al fondo)
     for (let iter = 0; iter < 25; iter++) {
       for (let i = 0; i < positions.length; i++) {
         for (let j = i + 1; j < positions.length; j++) {
@@ -291,7 +276,6 @@ export class BiomboEngineService {
           }
         }
 
-        // Mantener las bolas atraídas hacia el fondo cóncavo del cristal
         const distFromCenter = Math.sqrt(positions[i].x ** 2 + positions[i].z ** 2);
         const floorY = bowlCenterY + (distFromCenter * distFromCenter * bowlCurvature);
         if (positions[i].y < floorY) {
@@ -300,7 +284,6 @@ export class BiomboEngineService {
       }
     }
 
-    // 3. Aplicar al grupo local en reposo
     for (let index = 0; index < totalBalls; index++) {
       const ball = this.agitationBalls[index];
       const worldPos = positions[index].clone();
@@ -435,6 +418,7 @@ export class BiomboEngineService {
     hollowMesh.add(mechanism);
     this.mechanismGroup = mechanism;
     this.buildInternalSupportTripod(hollowMesh);
+
     const ballGroup = new THREE.Group();
     ballGroup.renderOrder = 3;
     hollowMesh.add(ballGroup);
@@ -510,77 +494,33 @@ export class BiomboEngineService {
     this.agitationBallStates = [];
     this.scene.updateMatrixWorld(true);
 
-    for (let index = 0; index < 18; index++) {
-      const ballRadius = 0.72;
-      const ballGeometry = new THREE.SphereGeometry(ballRadius, 22, 22);
-      const ballMaterial = new THREE.MeshPhysicalMaterial({
+    const total = 24;
+    for (let index = 0; index < total; index++) {
+      const ballRadius = 0.92;
+      const ballGeometry = new THREE.SphereGeometry(ballRadius, 24, 24);
+
+      // Textura esmaltada vibrante con acabado pulido de casino
+      const ballMaterial = new THREE.MeshStandardMaterial({
         color: this.agitationPalette[index % this.agitationPalette.length],
-        emissive: this.agitationPalette[index % this.agitationPalette.length],
-        emissiveIntensity: 0.28,
-        roughness: 0.28,
+        roughness: 0.18,
         metalness: 0.08,
-        transparent: true,
-        opacity: 1,
       });
+
       const ball = new THREE.Mesh(ballGeometry, ballMaterial);
-      ball.scale.setScalar(1.6);
       ball.castShadow = true;
       ball.receiveShadow = true;
       ball.renderOrder = 3;
 
-      // -------------------------------------------------------------------
-      // ✅ NUEVA POSICIÓN ALEATORIA (Dispersa las pelotas en el fondo)
-      // -------------------------------------------------------------------
-      const initialPosition = new THREE.Vector3(
-        (Math.random() - 0.5) * 5.0, // X aleatorio
-        -6.0 - Math.random(),        // Y junto al pie del biombo
-        (Math.random() - 0.5) * 5.0   // Z aleatorio
-      );
-
-      this.ballGroup.worldToLocal(initialPosition);
-      ball.position.copy(initialPosition);
       this.ballGroup.add(ball);
       this.agitationBalls.push(ball);
 
       this.agitationBallStates.push({
         mesh: ball,
-        velocity: new THREE.Vector3(
-          (Math.random() - 0.5) * 4,
-          2 + Math.random() * 3,
-          (Math.random() - 0.5) * 4,
-        ),
+        velocity: new THREE.Vector3(0, 0, 0),
         phase: index * 0.71,
         radius: ballRadius,
       });
     }
-  }
-
-  private buildExitRail(): void {
-    const railMaterial = new THREE.MeshStandardMaterial({
-      color: 0x111417,
-      metalness: 0.8,
-      roughness: 0.35,
-      emissive: 0x0d1218,
-      emissiveIntensity: 0.6,
-    });
-
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(10, 0.7, 2), railMaterial);
-    rail.position.set(12, -2.5, 0);
-    rail.rotation.z = -0.22;
-    rail.castShadow = true;
-    rail.receiveShadow = true;
-    this.scene.add(rail);
-
-    const guideLeft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.6, 0.12), new THREE.MeshStandardMaterial({ color: 0x6be7ff, emissive: 0x2aa9d9, emissiveIntensity: 0.7 }));
-    const guideRight = guideLeft.clone();
-    guideLeft.position.set(9.8, -2.5, -1.1);
-    guideRight.position.set(9.8, -2.5, 1.1);
-    this.scene.add(guideLeft, guideRight);
-
-    const outlet = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 2.4, 24), new THREE.MeshStandardMaterial({ color: 0x1b2028, metalness: 0.9, roughness: 0.35 }));
-    outlet.rotation.z = Math.PI / 2;
-    outlet.position.set(17, -2.9, 0);
-    this.scene.add(outlet);
   }
 
   private animate(): void {
@@ -590,9 +530,10 @@ export class BiomboEngineService {
       ? 1 / 60
       : Math.min((now - this.lastAgitationFrame) / 1000, 1 / 30);
     this.lastAgitationFrame = now;
-    const isAgitating = this.state() === 'SHUFFLING' || this.state() === 'WAITING' || this.state() === 'PICKING';
+    const isAgitating = this.state() === 'SHUFFLING';
 
-    const shaftSpeed = isAgitating ? 0.052 : 0;
+    // Giro del biombo durante la mezcla
+    const shaftSpeed = isAgitating ? 0.048 : 0;
     this.mainRotationAngle += shaftSpeed;
 
     if (this.mainRotationShaftGroup) {
@@ -604,204 +545,117 @@ export class BiomboEngineService {
     }
 
     if (this.mechanismGroup) {
-      this.mechanismBias += isAgitating ? 0.03 : 0.008;
-      const agitationBoost = isAgitating ? 1 : 0.15;
-      this.mechanismGroup.rotation.y += (0.035 + Math.sin(this.mechanismBias * 1.8) * 0.02 + Math.sin(this.mechanismBias * 4.7) * 0.012) * agitationBoost;
-      this.mechanismGroup.rotation.x = (Math.sin(this.mechanismBias * 2.4) * 0.7 + Math.sin(this.mechanismBias * 5.3) * 0.12) * agitationBoost;
-      this.mechanismGroup.rotation.z = (Math.cos(this.mechanismBias * 2.9) * 0.38 + Math.cos(this.mechanismBias * 6.1) * 0.08) * agitationBoost;
-      this.mechanismGroup.position.y = (Math.sin(this.mechanismBias * 1.7) * 0.2 + Math.sin(this.mechanismBias * 4.2) * 0.08) * agitationBoost;
+      this.mechanismBias += isAgitating ? 0.03 : 0.005;
+      const agitationBoost = isAgitating ? 1 : 0.12;
+      this.mechanismGroup.rotation.y += (0.035 + Math.sin(this.mechanismBias * 1.8) * 0.02) * agitationBoost;
+      this.mechanismGroup.rotation.x = (Math.sin(this.mechanismBias * 2.4) * 0.6) * agitationBoost;
+      this.mechanismGroup.rotation.z = (Math.cos(this.mechanismBias * 2.9) * 0.35) * agitationBoost;
     }
-    if (this.agitationBallStates.length > 0 && this.state() !== 'IDLE') {
-      // Radio real del domo transparente
-      const sphereRadius = 8.8;
 
-      // -------------------------------------------------------------------
-      // CORRECCIÓN DE GRAVEDAD DINÁMICA SEGÚN LA ROTACIÓN DEL BIOMBO
-      // -------------------------------------------------------------------
-      // 1. Obtenemos la orientación actual del contenedor en el mundo
+    // Dinámica física de las bolas interiores
+    if (this.agitationBallStates.length > 0) {
+      const sphereRadius = 8.6;
       const drumQuaternion = new THREE.Quaternion();
       if (this.ballGroup) {
         this.ballGroup.getWorldQuaternion(drumQuaternion);
       }
 
-      // 2. Definimos la dirección de la gravedad real (Abajo en el mundo: 0, -1, 0)
       const worldGravityDir = new THREE.Vector3(0, -1, 0);
-
-      // 3. Transformamos esa gravedad al espacio local de las pelotas (invirtiendo la rotación del contenedor)
       const localGravityDir = worldGravityDir.clone().applyQuaternion(drumQuaternion.clone().invert());
 
-      // -------------------------------------------------------------------
-      // PASO A: INTEGRACIÓN DE MOVIMIENTO Y GRAVEDAD DE REPOSO
-      // -------------------------------------------------------------------
       this.agitationBallStates.forEach((ballState) => {
         const ball = ballState.mesh;
         const velocity = ballState.velocity;
 
-        ballState.radius = 1.35;
-        ball.scale.setScalar(1.55);
-
         if (isAgitating) {
           const time = now * 0.005 + ballState.phase;
-
-          // Impulso de elevación en la dirección opuesta a la gravedad local
-          // (Se proyecta hacia "arriba" relativo al fondo del domo actual)
           const localYPosition = ball.position.dot(localGravityDir.clone().negate());
           if (localYPosition < -2.0) {
             const pushUpDir = localGravityDir.clone().negate();
-            velocity.addScaledVector(pushUpDir, (Math.random() * 38.0 + 22.0) * deltaSeconds);
+            velocity.addScaledVector(pushUpDir, (Math.random() * 35.0 + 20.0) * deltaSeconds);
           }
 
-          // Turbulencia
-          const pushX = (Math.random() - 0.5) * 22.0;
-          const pushZ = Math.cos(time * 3.8 + ball.position.y) * 22.0 + (Math.random() - 0.5) * 10.0;
+          const pushX = (Math.random() - 0.5) * 20.0;
+          const pushZ = Math.cos(time * 3.5 + ball.position.y) * 20.0 + (Math.random() - 0.5) * 8.0;
 
           velocity.x += pushX * deltaSeconds;
           velocity.z += pushZ * deltaSeconds;
-
-          // Gravedad ligera en agitación usando la dirección local orientada al suelo real
-          velocity.addScaledVector(localGravityDir, 45.0 * deltaSeconds);
+          velocity.addScaledVector(localGravityDir, 42.0 * deltaSeconds);
         } else {
-          // ESTADO DE REPOSO (MONTON ORGANICO)
-          // Gravedad fuerte orientada SIEMPRE hacia el suelo del mundo real
-          velocity.addScaledVector(localGravityDir, 85.0 * deltaSeconds);
-
-          // Fricción rápida para detener la velocidad inercial
-          velocity.x *= 0.60;
-          velocity.z *= 0.60;
+          // Reposo gravitacional natural hacia el fondo
+          velocity.addScaledVector(localGravityDir, 75.0 * deltaSeconds);
+          velocity.x *= 0.70;
+          velocity.z *= 0.70;
         }
 
-        // Fricción atmosférica general
         velocity.x *= Math.pow(0.95, deltaSeconds * 60);
         velocity.z *= Math.pow(0.95, deltaSeconds * 60);
-        velocity.y = Math.max(velocity.y, -100.0);
-
-        // Actualizar posición
         ball.position.addScaledVector(velocity, deltaSeconds);
 
-        // -----------------------------------------------------------------
-        // PASO B: COLISIÓN RÍGIDA CONTRA LA ESFERA DEL BIOMBO
-        // -----------------------------------------------------------------
+        // Contención esférica
         const currentDistance = ball.position.length();
         const maxAllowedDistance = sphereRadius - ballState.radius;
 
         if (currentDistance > maxAllowedDistance) {
           const normal = ball.position.clone().normalize();
           ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
-
           const dot = velocity.dot(normal);
           if (dot > 0) {
-            const bounce = isAgitating ? 1.4 : 0.1; // Sin rebote en reposo para asentar
+            const bounce = isAgitating ? 1.2 : 0.05;
             velocity.sub(normal.multiplyScalar(bounce * dot));
-
-            if (isAgitating) {
-              velocity.x += (Math.random() - 0.5) * 5.0;
-              velocity.z += (Math.random() - 0.5) * 5.0;
-            }
           }
         }
       });
 
-      // -------------------------------------------------------------------
-      // PASO C: COLISIÓN INTER-PELOTAS CON DESLIZAMIENTO DE APILAMIENTO
-      // -------------------------------------------------------------------
+      // Relajación de contactos inter-bolas
       const balls = this.agitationBallStates;
-      const subSteps = 6; // Iteraciones de física fina para evitar superposiciones rígidas
+      for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+          const delta = new THREE.Vector3().subVectors(balls[j].mesh.position, balls[i].mesh.position);
+          const distance = delta.length();
+          const minDistance = balls[i].radius + balls[j].radius;
 
-      for (let step = 0; step < subSteps; step++) {
-        for (let i = 0; i < balls.length; i++) {
-          for (let j = i + 1; j < balls.length; j++) {
-            const b1 = balls[i];
-            const b2 = balls[j];
+          if (distance < minDistance && distance > 0.0001) {
+            const normal = delta.clone().normalize();
+            const overlap = minDistance - distance;
+            const correction = normal.clone().multiplyScalar(overlap * 0.5);
 
-            const delta = new THREE.Vector3().subVectors(b2.mesh.position, b1.mesh.position);
-            let distance = delta.length();
-            const minDistance = b1.radius + b2.radius;
-
-            if (distance < minDistance && distance > 0.0001) {
-              let normal = delta.clone().normalize();
-
-              // SI ESTÁN EN REPOSO Y CASI ALINEADAS EN LA DIRECCIÓN DE GRAVEDAD:
-              // Forzamos a que resbalen lateralmente (rompe la columna recta)
-              const alignmentWithGravity = Math.abs(normal.dot(localGravityDir));
-              if (!isAgitating && alignmentWithGravity > 0.6) {
-                const angle = (i + j) * 1.5; // Angulo pseudo-aleatorio único por pareja
-                normal.x += Math.cos(angle) * 0.45;
-                normal.z += Math.sin(angle) * 0.45;
-                normal.normalize();
-              }
-
-              const overlap = minDistance - distance;
-              const correction = normal.clone().multiplyScalar(overlap * 0.5);
-
-              // Separación posicional directa
-              b1.mesh.position.sub(correction);
-              b2.mesh.position.add(correction);
-
-              // Fricción/Impulso
-              const relativeVelocity = new THREE.Vector3().subVectors(b1.velocity, b2.velocity);
-              const speedAlongNormal = relativeVelocity.dot(normal);
-
-              if (speedAlongNormal > 0) {
-                const restitution = isAgitating ? 0.70 : 0.05; // Cero elasticidad en reposo
-                const impulseMagnitude = speedAlongNormal * (1 + restitution) * 0.5;
-                const impulse = normal.clone().multiplyScalar(impulseMagnitude);
-
-                b1.velocity.sub(impulse);
-                b2.velocity.add(impulse);
-              }
-            }
+            balls[i].mesh.position.sub(correction);
+            balls[j].mesh.position.add(correction);
           }
         }
       }
-
-      // -------------------------------------------------------------------
-      // PASO D: ROTACIÓN VISUAL SOBRE SU PROPIO EJE
-      // -------------------------------------------------------------------
-      this.agitationBallStates.forEach((ballState) => {
-        const ball = ballState.mesh;
-        const velocity = ballState.velocity;
-
-        ball.rotation.x += velocity.z * deltaSeconds * 1.5;
-        ball.rotation.z -= velocity.x * deltaSeconds * 1.5;
-        ball.rotation.y += velocity.y * deltaSeconds * 0.4;
-        ball.visible = true;
-      });
     }
 
-    // Efectos de bolas seleccionadas
-    for (let index = this.ballEffects.length - 1; index >= 0; index--) {
-      const animation = this.ballEffects[index];
-      const elapsed = (now - animation.startAt) / 1000;
-      const t = Math.min(elapsed / animation.duration, 1);
-      const eased = 1 - Math.pow(1 - t, 3);
-      const point = animation.curve.getPointAt(eased);
+    // =========================================================================
+    // ⚙️ FÍSICA CINEMÁTICA DE BOLAS EXTRAÍDAS EN EL RIEL INFERIOR
+    // =========================================================================
 
-      const gravityDrop = Math.max(0, (t - 0.2) * 3.8) * 1.6;
-      const verticalBias = Math.sin(elapsed * 18 + animation.wobble) * 0.26;
-      const lateralBias = Math.cos(elapsed * 14 + animation.wobble) * 0.18;
 
-      animation.mesh.position.set(
-        point.x + lateralBias,
-        point.y - gravityDrop + verticalBias,
-        point.z + Math.sin(elapsed * 22 + animation.wobble) * 0.12,
-      );
+    for (let index = 0; index < this.ballEffects.length; index++) {
+      const anim = this.ballEffects[index];
+      const elapsed = (now - anim.startAt) / 1000;
+      const progress = Math.min(elapsed / anim.duration, 1);
 
-      animation.mesh.rotation.x += animation.spin.x;
-      animation.mesh.rotation.y += animation.spin.y;
-      animation.mesh.rotation.z += animation.spin.z;
+      if (!anim.hasSettled) {
+        // Easing cúbico para aceleración por gravedad y deceleración en la bandeja
+        const easedT = progress < 0.5
+          ? 2 * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
 
-      if (t >= 1) {
-        this.scene.remove(animation.mesh);
-        animation.mesh.traverse((child) => {
-          const mesh = child as THREE.Mesh;
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((material) => material.dispose());
-          } else if (mesh.material) {
-            mesh.material.dispose();
-          }
-        });
-        this.ballEffects.splice(index, 1);
+        const currentPos = anim.curve.getPointAt(easedT);
+        anim.mesh.position.copy(currentPos);
+
+        const rollSpeed = (1 - progress * 0.6) * 0.42;
+        anim.mesh.rotation.z -= rollSpeed; // Gira rodando hacia la derecha
+        anim.mesh.rotation.y += rollSpeed * 0.15;
+
+        if (progress >= 1) {
+          anim.hasSettled = true;
+          anim.mesh.position.copy(anim.targetSlotPos);
+          // Orientar el número al frente de la cámara perfectamente erguido
+          anim.mesh.rotation.set(0, 0, 0);
+        }
       }
     }
 
@@ -822,19 +676,23 @@ export class BiomboEngineService {
 
     const drawSequence = generateBiomboResults(this.config);
 
+    // 1. Fase de agitación completa (8 segundos girando)
     const shuffleTimer = window.setTimeout(() => {
       this.state.set('PICKING');
+
+      // 2. Extraer las bolas una por una por el fondo inferior hacia la rampa
       drawSequence.forEach((ballNumber, index) => {
         const timer = window.setTimeout(() => {
           const current = [...this.extractedBalls()];
           current.push(ballNumber);
           this.extractedBalls.set(current);
-          this.spawnBallExit(ballNumber, index);
+
+          this.spawnBallExitThroughBottom(ballNumber, index);
 
           if (index === drawSequence.length - 1) {
-            window.setTimeout(() => this.state.set('FINISHED'), 280);
+            window.setTimeout(() => this.state.set('FINISHED'), 2200);
           }
-        }, index * 700);
+        }, index * 2400); // 2.4s entre cada bola para ver el descenso y rodamiento completo
 
         this.drawTimers.push(timer);
       });
@@ -843,54 +701,61 @@ export class BiomboEngineService {
     this.drawTimers.push(shuffleTimer);
   }
 
-  private spawnBallExit(ballNumber: number, index: number): void {
-    const material = new THREE.MeshPhysicalMaterial({
-      color: this.config?.ballType === 'yellow' ? 0xffd200 : 0xffffff,
-      metalness: 0.15,
-      roughness: 0.22,
-      clearcoat: 1,
-      clearcoatRoughness: 0.2,
-      emissive: this.config?.ballType === 'yellow' ? 0xffd200 : 0x2c5cff,
-      emissiveIntensity: 0.3,
-      transmission: 0.1,
-      transparent: true,
-      opacity: 1,
-    });
-
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.1, 28, 28), material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.position.set(-6.2 + index * 0.5, 5.3 + (index % 2) * 0.9, -1.2 + index * 0.9);
+  private spawnBallExitThroughBottom(ballNumber: number, index: number): void {
+    const ballRadius = 0.95;
+    const ballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
 
     const numberTexture = this.createBallNumberTexture(ballNumber);
-    const label = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.5, 1.5),
-      new THREE.MeshBasicMaterial({ map: numberTexture, transparent: true, depthWrite: false })
-    );
-    label.position.set(0, 0, 0.55);
-    mesh.add(label);
+    const material = new THREE.MeshStandardMaterial({
+      map: numberTexture,
+      roughness: 0.15,
+      metalness: 0.1,
+    });
 
+    const mesh = new THREE.Mesh(ballGeometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    // =========================================================================
+    // 🎯 FÍSICA DE TOPE: LA 1ª RUEDA HASTA EL FINAL, 2ª Y 3ª SE ACUMULAN A LA IZQUIERDA
+    // =========================================================================
+    const trackFloorY = -10.95;
+    const trackZ = 2.45;
+
+    const endOfTrackX = 19; // Posición de tope final
+    const ballSpacing = 2.15; // Distancia entre centros de bolas
+
+    const targetSlotX = endOfTrackX - (index * ballSpacing);
+    const targetSlotPos = new THREE.Vector3(targetSlotX, trackFloorY, trackZ);
+
+    const pStart = new THREE.Vector3(0, -8.2, 0.2);
+    const pDrop = new THREE.Vector3(0.1, -9.5, 0.9);
+    const pRampEntry = new THREE.Vector3(0.4, -10.5, 1.8);
+    const pRampMid = new THREE.Vector3(Math.max(0.6, targetSlotX * 0.5), -10.85, 2.2);
+
+    const curve = new THREE.CatmullRomCurve3([
+      pStart,
+      pDrop,
+      pRampEntry,
+      pRampMid,
+      targetSlotPos,
+    ]);
+
+    mesh.position.copy(pStart);
     this.scene.add(mesh);
 
-    const from = mesh.position.clone();
-    const to = new THREE.Vector3(18.8 + index * 0.45, -3.8 - (index * 0.38), 0.2 + (index - 1) * 0.8);
-    const curve = new THREE.CatmullRomCurve3([
-      from,
-      new THREE.Vector3(-2.6, 4.2, 1.7),
-      new THREE.Vector3(5.8, 1.2, 1.2),
-      new THREE.Vector3(13.2, -1.4, 0.75),
-      to,
-    ]);
+    if (this.agitationBalls[index]) {
+      this.agitationBalls[index].visible = false;
+    }
 
     this.ballEffects.push({
       mesh,
       startAt: performance.now(),
-      duration: 1.9 + index * 0.16,
-      from,
-      to,
+      duration: 1.85,
       curve,
-      wobble: index * 1.6 + Math.random() * 0.9,
-      spin: new THREE.Vector3(0.2 + Math.random() * 0.1, 0.26 + Math.random() * 0.15, 0.14 + Math.random() * 0.12),
+      targetSlotPos,
+      ballNumber,
+      hasSettled: false,
     });
   }
 
@@ -903,17 +768,30 @@ export class BiomboEngineService {
       return new THREE.CanvasTexture(canvas);
     }
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const isYellow = this.config?.ballType === 'yellow';
+    const baseColor = isYellow ? '#ffd200' : this.agitationPalette[(value - 1) % this.agitationPalette.length];
+
+    // Fondo brillante esmaltado
+    ctx.fillStyle = typeof baseColor === 'number' ? `#${baseColor.toString(16).padStart(6, '0')}` : baseColor;
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Círculo blanco central característico de las bolas de bingo
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(128, 128, 108, 0, Math.PI * 2);
+    ctx.arc(128, 128, 80, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = this.config?.ballType === 'yellow' ? '#111111' : '#0b0d12';
-    ctx.font = 'bold 120px Arial';
+    // Número impreso nítido
+    ctx.fillStyle = '#0f1115';
+    ctx.font = 'bold 90px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(value), 128, 138);
+    ctx.fillText(String(value), 128, 134);
+
+    // Subrayado para el 6 y 9
+    if (value === 6 || value === 9 || value === 66 || value === 99 || value === 69 || value === 96) {
+      ctx.fillRect(100, 185, 56, 8);
+    }
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
@@ -943,20 +821,16 @@ export class BiomboEngineService {
   private clearBallEffects(): void {
     for (const animation of this.ballEffects) {
       this.scene?.remove(animation.mesh);
-      animation.mesh.traverse((child) => {
-        if ((child as THREE.Mesh).geometry) {
-          (child as THREE.Mesh).geometry.dispose();
-        }
-        if ((child as THREE.Mesh).material) {
-          const material = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
-          if (Array.isArray(material)) {
-            material.forEach((item) => item.dispose());
-          } else {
-            material.dispose();
-          }
-        }
-      });
+      animation.mesh.geometry?.dispose();
+      if (Array.isArray(animation.mesh.material)) {
+        animation.mesh.material.forEach((mat) => mat.dispose());
+      } else {
+        animation.mesh.material?.dispose();
+      }
     }
     this.ballEffects = [];
+
+    // Restaurar visibilidad de bolas internas para la nueva ronda
+    this.agitationBalls.forEach((b) => (b.visible = true));
   }
 }
