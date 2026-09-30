@@ -533,7 +533,8 @@ export class BiomboEngineService {
     const isAgitating = this.state() === 'SHUFFLING';
 
     // Giro del biombo durante la mezcla
-    const shaftSpeed = isAgitating ? 0.048 : 0;
+    // const shaftSpeed = isAgitating ? 0.048 : 0;
+    const shaftSpeed = isAgitating ? 0.075 : 0;
     this.mainRotationAngle += shaftSpeed;
 
     if (this.mainRotationShaftGroup) {
@@ -553,8 +554,11 @@ export class BiomboEngineService {
     }
 
     // Dinámica física de las bolas interiores
-    if (this.agitationBallStates.length > 0) {
-      const sphereRadius = 8.6;
+    // =========================================================================
+    // ⚙️ DINÁMICA FÍSICA BALÍSTICA DE IMPACTO REAL
+    // =========================================================================
+    if (this.agitationBallStates.length > 0 && this.state() !== 'IDLE') {
+      const sphereRadius = 9.8;
       const drumQuaternion = new THREE.Quaternion();
       if (this.ballGroup) {
         this.ballGroup.getWorldQuaternion(drumQuaternion);
@@ -568,31 +572,51 @@ export class BiomboEngineService {
         const velocity = ballState.velocity;
 
         if (isAgitating) {
-          const time = now * 0.005 + ballState.phase;
           const localYPosition = ball.position.dot(localGravityDir.clone().negate());
-          if (localYPosition < -2.0) {
-            const pushUpDir = localGravityDir.clone().negate();
-            velocity.addScaledVector(pushUpDir, (Math.random() * 35.0 + 20.0) * deltaSeconds);
+
+          // 1. Impulso balístico que barre desde el pie del biombo
+          if (localYPosition < -5.8) {
+            const kickUp = Math.random() * 55.0 + 40.0;
+            velocity.addScaledVector(localGravityDir.clone().negate(), kickUp * deltaSeconds * 2.8);
+
+            const kickX = (Math.random() - 0.5) * 45.0;
+            const kickZ = (Math.random() - 0.5) * 45.0;
+            velocity.x += kickX * deltaSeconds * 2.2;
+            velocity.z += kickZ * deltaSeconds * 2.2;
           }
 
-          const pushX = (Math.random() - 0.5) * 20.0;
-          const pushZ = Math.cos(time * 3.5 + ball.position.y) * 20.0 + (Math.random() - 0.5) * 8.0;
+          velocity.addScaledVector(localGravityDir, 68.0 * deltaSeconds);
 
-          velocity.x += pushX * deltaSeconds;
-          velocity.z += pushZ * deltaSeconds;
-          velocity.addScaledVector(localGravityDir, 42.0 * deltaSeconds);
+          // Fricción ligera de aire en pleno giro
+          velocity.x *= Math.pow(0.992, deltaSeconds * 60);
+          velocity.z *= Math.pow(0.992, deltaSeconds * 60);
+          velocity.y *= Math.pow(0.995, deltaSeconds * 60);
         } else {
-          // Reposo gravitacional natural hacia el fondo
-          velocity.addScaledVector(localGravityDir, 75.0 * deltaSeconds);
-          velocity.x *= 0.70;
-          velocity.z *= 0.70;
+          // ⭐ 2. FASE DE ASENTAMIENTO (FIN DEL GIRO / PICKING):
+          const localYPosition = ball.position.dot(localGravityDir.clone().negate());
+
+          // Gravedad fuerte (110): caen de golpe hacia el piso de vidrio sin frenarse en el aire
+          velocity.addScaledVector(localGravityDir, 110.0 * deltaSeconds);
+
+          // Fricción suave mientras caen por el aire
+          velocity.x *= Math.pow(0.96, deltaSeconds * 60);
+          velocity.z *= Math.pow(0.96, deltaSeconds * 60);
+          velocity.y *= Math.pow(0.97, deltaSeconds * 60);
+
+          // ⭐ Freno y reposo absoluto ÚNICAMENTE cuando ya llegaron al fondo (Y < -6.0)
+          if (localYPosition < -6.0) {
+            velocity.multiplyScalar(Math.pow(0.65, deltaSeconds * 60));
+
+            // Si ya están asentadas en la base, congelar a 0 (cero temblor)
+            if (velocity.lengthSq() < 0.25) {
+              velocity.set(0, 0, 0);
+            }
+          }
         }
 
-        velocity.x *= Math.pow(0.95, deltaSeconds * 60);
-        velocity.z *= Math.pow(0.95, deltaSeconds * 60);
         ball.position.addScaledVector(velocity, deltaSeconds);
 
-        // Contención esférica
+        // ⭐ 3. COLISIÓN CON EL CRISTAL SIN MICRO-REBOTES
         const currentDistance = ball.position.length();
         const maxAllowedDistance = sphereRadius - ballState.radius;
 
@@ -600,14 +624,24 @@ export class BiomboEngineService {
           const normal = ball.position.clone().normalize();
           ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
           const dot = velocity.dot(normal);
+
           if (dot > 0) {
-            const bounce = isAgitating ? 1.2 : 0.05;
-            velocity.sub(normal.multiplyScalar(bounce * dot));
+            if (isAgitating) {
+              // Rebote vivo durante el sorteo
+              const bounce = 1.65;
+              velocity.sub(normal.multiplyScalar(bounce * dot));
+              velocity.x += (Math.random() - 0.5) * 8.0;
+              velocity.z += (Math.random() - 0.5) * 8.0;
+            } else {
+              // En reposo: absorción total del impacto (cero temblor contra el vidrio)
+              velocity.sub(normal.multiplyScalar(dot));
+              velocity.multiplyScalar(0.6);
+            }
           }
         }
       });
 
-      // Relajación de contactos inter-bolas
+      // ⭐ 5. CHOQUES INTER-PELOTAS (Intercambio de energía para que se dispersen al tocarse)
       const balls = this.agitationBallStates;
       for (let i = 0; i < balls.length; i++) {
         for (let j = i + 1; j < balls.length; j++) {
@@ -622,6 +656,17 @@ export class BiomboEngineService {
 
             balls[i].mesh.position.sub(correction);
             balls[j].mesh.position.add(correction);
+
+            if (isAgitating) {
+              const relativeVelocity = new THREE.Vector3().subVectors(balls[i].velocity, balls[j].velocity);
+              const speedAlongNormal = relativeVelocity.dot(normal);
+
+              if (speedAlongNormal > 0) {
+                const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.75);
+                balls[i].velocity.sub(impulse);
+                balls[j].velocity.add(impulse);
+              }
+            }
           }
         }
       }
