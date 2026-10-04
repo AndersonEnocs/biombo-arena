@@ -12,6 +12,10 @@ type BallExitAnimation = {
   targetSlotPos: THREE.Vector3;
   ballNumber: number;
   hasSettled: boolean;
+  startRotZ?: number;
+  startRotY?: number;
+  startRotX?: number;
+  targetRotZ?: number;
 };
 
 type AgitationBallState = {
@@ -691,15 +695,64 @@ export class BiomboEngineService {
         const currentPos = anim.curve.getPointAt(easedT);
         anim.mesh.position.copy(currentPos);
 
-        const rollSpeed = (1 - progress * 0.6) * 0.42;
-        anim.mesh.rotation.z -= rollSpeed; // Gira rodando hacia la derecha
-        anim.mesh.rotation.y += rollSpeed * 0.15;
+        // const rollSpeed = (1 - progress * 0.6) * 0.42;
+        // anim.mesh.rotation.z -= rollSpeed; // Gira rodando hacia la derecha
+        // anim.mesh.rotation.y += rollSpeed * 0.15;
+
+        // if (progress >= 1) {
+        //   anim.hasSettled = true;
+        //   anim.mesh.position.copy(anim.targetSlotPos);
+        //   anim.mesh.rotation.set(-0.22, -Math.PI / 2, 0);
+        // }
+
+        const targetQuat = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(-0.22, -Math.PI / 2, 0)
+        );
+
+        if (progress < 0.65) {
+          // Fase 1 (0% a 65%): Rueda libremente hacia la derecha (+X)
+          const rollSpeed = (1 - progress * 0.4) * 0.45;
+          anim.mesh.rotation.z -= rollSpeed;
+          anim.mesh.rotation.y += rollSpeed * 0.12;
+          anim.mesh.rotation.x = -0.22 * progress;
+        } else {
+          // Fase 2 (65% a 100%): Frenado continuo hacia adelante (NUNCA retrocede)
+          if (anim.startRotZ === undefined || anim.targetRotZ === undefined) {
+            anim.startRotZ = anim.mesh.rotation.z;
+            anim.startRotY = anim.mesh.rotation.y;
+            anim.startRotX = anim.mesh.rotation.x;
+
+            const currentZ = anim.mesh.rotation.z;
+            let targetZ = Math.floor(currentZ / (Math.PI * 2)) * (Math.PI * 2);
+
+            if (currentZ - targetZ < Math.PI * 0.9) {
+              targetZ -= Math.PI * 2;
+            }
+            anim.targetRotZ = targetZ;
+          }
+
+          const blend = (progress - 0.65) / 0.35; // 0 a 1
+          const smoothBlend = blend * blend * (3 - 2 * blend); // Desaceleración suave (smoothstep)
+
+          // ⭐ Variables tipadas estrictas como 'number' para satisfacer a TypeScript
+          const startZ = anim.startRotZ ?? 0;
+          const targetZ = anim.targetRotZ ?? 0;
+          const startY = anim.startRotY ?? 0;
+          const startX = anim.startRotX ?? 0;
+
+          // 1. El giro en Z SIEMPRE sigue avanzando hacia la derecha hasta frenar a 0
+          anim.mesh.rotation.z = THREE.MathUtils.lerp(startZ, targetZ, smoothBlend);
+
+          // 2. Y y X se orientan de forma fluida hacia la cámara
+          anim.mesh.rotation.y = THREE.MathUtils.lerp(startY, -Math.PI / 2, smoothBlend);
+          anim.mesh.rotation.x = THREE.MathUtils.lerp(startX, -0.22, smoothBlend);
+        }
 
         if (progress >= 1) {
           anim.hasSettled = true;
           anim.mesh.position.copy(anim.targetSlotPos);
-          // Orientar el número al frente de la cámara perfectamente erguido
-          anim.mesh.rotation.set(0, 0, 0);
+          // Posición final estacionada mostrando el número al frente
+          anim.mesh.rotation.set(-0.22, -Math.PI / 2, anim.targetRotZ || 0);
         }
       }
     }
