@@ -1,5 +1,6 @@
 import { inject, Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RapierLoaderService } from '../../../core/services/rapier-loader.service';
 import { SolidEntity } from '../models/solid.entity';
 import { BiomboConfig, BiomboState, generateBiomboResults } from '../utilities/biombo.interfaces';
@@ -12,6 +13,7 @@ type BallExitAnimation = {
   targetSlotPos: THREE.Vector3;
   ballNumber: number;
   hasSettled: boolean;
+  progress: number;
   startRotZ?: number;
   startRotY?: number;
   startRotX?: number;
@@ -34,6 +36,7 @@ export class BiomboEngineService {
 
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
+  private controls!: OrbitControls;
   private renderer!: THREE.WebGLRenderer;
   private animFrameId: number | null = null;
   private solids: { [key: string]: SolidEntity } = {};
@@ -101,6 +104,7 @@ export class BiomboEngineService {
       this.camera.position.set(0, 0, 48);
       this.camera.lookAt(0, 0, 0);
 
+      // Crear canvas de probe antes de OrbitControls
       const probeCanvas = document.createElement('canvas');
       const probeContext =
         probeCanvas.getContext('webgl2') ??
@@ -110,6 +114,15 @@ export class BiomboEngineService {
       if (!probeContext) {
         throw new Error('Tu navegador o el entorno actual no soportan WebGL.');
       }
+
+      const controls = new OrbitControls(this.camera, probeCanvas);
+      controls.target.copy(this.rotationCenter);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.minDistance = 10;
+      controls.maxDistance = 200;
+      controls.enablePan = false;
+      this.controls = controls;
 
       this.renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -677,6 +690,61 @@ export class BiomboEngineService {
     }
 
     // =========================================================================
+    // 📷 CÁMARA DE SEGUIMIENTO DE BOLAS
+    // =========================================================================
+    // Calcular la posición objetivo de la cámara basada en las bolas activas
+    if (this.camera && this.controls) {
+      const targetPos = new THREE.Vector3();
+
+      // 1. Priorizar bolas en trayectoria (ballEffects - las que están siendo extraídas)
+      if (this.ballEffects.length > 0) {
+        let totalWeight = 0;
+        this.ballEffects.forEach((anim) => {
+          if (!anim.hasSettled) {
+            const easedT = anim.progress < 0.5
+              ? 2 * anim.progress * anim.progress
+              : 1 - Math.pow(-2 * anim.progress + 2, 2) / 2;
+            const currentPos = anim.curve.getPointAt(easedT);
+            targetPos.add(currentPos);
+            totalWeight++;
+          }
+        });
+
+        // Si hay bolas en trayectoria, usar su posición promedio
+        if (totalWeight > 0) {
+          targetPos.divideScalar(totalWeight);
+        }
+      }
+
+      // 2. Si no hay bolas en trayectoria, considerar las bolas en agitación
+      if (targetPos.lengthSq() === 0 && this.agitationBallStates.length > 0) {
+        let totalWeight = 0;
+        this.agitationBallStates.forEach((ballState) => {
+          const pos = ballState.mesh.position;
+          // Solo considerar bolas que no estén en reposo absoluto
+          if (ballState.velocity.lengthSq() > 0.1) {
+            targetPos.add(pos);
+            totalWeight++;
+          }
+        });
+
+        if (totalWeight > 0) {
+          targetPos.divideScalar(totalWeight);
+        }
+      }
+
+      // 3. Si aún no hay posición válida, usar el centro de la escena como fallback
+      if (targetPos.lengthSq() === 0) {
+        targetPos.set(0, 0, 0);
+      }
+
+      // Suavizar el movimiento de la cámara con interpolación lineal (lerp)
+      // El factor 0.1 proporciona un seguimiento suave sin ser demasiado lento
+      this.controls.target.lerp(targetPos, 0.1);
+      this.controls.update();
+    }
+
+    // =========================================================================
     // ⚙️ FÍSICA CINEMÁTICA DE BOLAS EXTRAÍDAS EN EL RIEL INFERIOR
     // =========================================================================
 
@@ -854,6 +922,7 @@ export class BiomboEngineService {
       targetSlotPos,
       ballNumber,
       hasSettled: false,
+      progress: 0,
     });
   }
 
