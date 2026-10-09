@@ -25,12 +25,27 @@ type AgitationBallState = {
   radius: number;
 };
 
+type SecondaryBiomboRig = {
+  config: BiomboConfig;
+  root: THREE.Group;
+  drumGroup: THREE.Group;
+  rotationShaftGroup: THREE.Group;
+  mechanismGroup: THREE.Group;
+  agitationBalls: THREE.Mesh[];
+  agitationBallStates: AgitationBallState[];
+  drawTimers: number[];
+  mainRotationAngle: number;
+  mechanismBias: number;
+};
+
 @Injectable()
 export class BiomboEngineService {
   public readonly isReady = signal(false);
   public readonly errorMessage = signal<string | null>(null);
   public readonly extractedBalls = signal<number[]>([]);
   public readonly state = signal<BiomboState>('IDLE');
+  public readonly secondaryExtractedBalls = signal<number[]>([]);
+  public readonly secondaryState = signal<BiomboState>('IDLE');
 
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
@@ -38,7 +53,10 @@ export class BiomboEngineService {
   private animFrameId: number | null = null;
   private solids: { [key: string]: SolidEntity } = {};
   private config: BiomboConfig | null = null;
+  private machineRoot!: THREE.Group;
+  private secondaryRig?: SecondaryBiomboRig;
   private drawTimers: number[] = [];
+  private secondaryDrawTimers: number[] = [];
   private ballEffects: BallExitAnimation[] = [];
   private drumGroup?: THREE.Group;
   private mainRotationShaftGroup?: THREE.Group;
@@ -66,10 +84,18 @@ export class BiomboEngineService {
   private readonly rapierLoader = inject(RapierLoaderService);
   private readonly ngZone = inject(NgZone);
 
-  public async initialize(container: HTMLElement, config: BiomboConfig): Promise<void> {
+  public async initialize(
+    container: HTMLElement,
+    config: BiomboConfig,
+    secondaryConfig: BiomboConfig | null = null,
+  ): Promise<void> {
     this.config = config;
+    this.secondaryRig = undefined;
+    this.clearSecondaryTimers();
     this.extractedBalls.set([]);
     this.state.set('IDLE');
+    this.secondaryExtractedBalls.set([]);
+    this.secondaryState.set('IDLE');
     this.errorMessage.set(null);
     this.mainRotationAngle = 0;
     this.clearBallEffects();
@@ -82,6 +108,9 @@ export class BiomboEngineService {
 
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x0a0c10);
+      this.machineRoot = new THREE.Group();
+      this.machineRoot.name = 'biombo-machine-alpha';
+      this.scene.add(this.machineRoot);
 
       const skyboxTexture = await new Promise<THREE.CubeTexture>((resolve, reject) => {
         new THREE.CubeTextureLoader()
@@ -207,11 +236,15 @@ export class BiomboEngineService {
         (ornaments['glass_hole'] as THREE.Mesh).material = glassMaterial;
         (ornaments['glass_hole'] as THREE.Mesh).visible = false;
       }
-      ornaments.addToScene(this.scene);
-      ramp.addToScene(this.scene);
+      ornaments.meshes.forEach((mesh) => this.machineRoot.add(mesh));
+      ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
+      if (secondaryConfig) {
+        this.createSecondaryRig(secondaryConfig);
+      }
+      this.updateSceneLayout(width, height);
 
       this.ngZone.runOutsideAngular(() => this.animate());
       this.isReady.set(true);
@@ -221,6 +254,115 @@ export class BiomboEngineService {
       this.errorMessage.set(message);
       throw new Error(message);
     }
+  }
+
+  public setSecondaryConfig(config: BiomboConfig | null): void {
+    if (!this.isReady() || !this.scene || !this.machineRoot) {
+      return;
+    }
+
+    if (!config) {
+      this.clearSecondaryTimers();
+      if (this.secondaryRig) {
+        this.clearBallEffects(this.secondaryRig.root);
+        this.scene.remove(this.secondaryRig.root);
+        this.secondaryRig = undefined;
+      }
+      this.secondaryState.set('IDLE');
+      this.secondaryExtractedBalls.set([]);
+      this.updateSceneLayout(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+      return;
+    }
+
+    if (this.secondaryRig?.config.id === config.id) {
+      this.secondaryRig.config = config;
+      return;
+    }
+
+    this.clearSecondaryTimers();
+    if (this.secondaryRig) {
+      this.clearBallEffects(this.secondaryRig.root);
+      this.scene.remove(this.secondaryRig.root);
+    }
+    this.secondaryState.set('IDLE');
+    this.secondaryExtractedBalls.set([]);
+    this.createSecondaryRig(config);
+    this.updateSceneLayout(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+  }
+
+  private createSecondaryRig(config: BiomboConfig): void {
+    const root = this.machineRoot.clone(true);
+    root.name = 'biombo-machine-beta';
+    const drawnBalls: THREE.Object3D[] = [];
+    root.traverse((object) => {
+      if (object.userData['isDrawnBall']) {
+        drawnBalls.push(object);
+      }
+    });
+    drawnBalls.forEach((ball) => ball.parent?.remove(ball));
+
+    const drumGroup = root.getObjectByName('sphere-rotation-pivot');
+    const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
+    const mechanismGroup = root.getObjectByName('internal-mechanism');
+    if (!(drumGroup instanceof THREE.Group)
+      || !(rotationShaftGroup instanceof THREE.Group)
+      || !(mechanismGroup instanceof THREE.Group)) {
+      throw new Error('No se pudo preparar el segundo biombo.');
+    }
+
+    const agitationBalls = this.agitationBalls.map((_, index) => {
+      const ball = root.getObjectByName(`agitation-ball-${index}`);
+      if (!(ball instanceof THREE.Mesh)) {
+        throw new Error('No se pudo preparar el conjunto de bolas del segundo biombo.');
+      }
+      ball.visible = true;
+      return ball;
+    });
+
+    this.secondaryRig = {
+      config,
+      root,
+      drumGroup,
+      rotationShaftGroup,
+      mechanismGroup,
+      agitationBalls,
+      agitationBallStates: agitationBalls.map((mesh, index) => ({
+        mesh,
+        velocity: new THREE.Vector3(),
+        phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
+        radius: this.agitationBallStates[index]?.radius ?? 0.92,
+      })),
+      drawTimers: this.secondaryDrawTimers,
+      mainRotationAngle: this.mainRotationAngle,
+      mechanismBias: this.mechanismBias,
+    };
+    this.scene.add(root);
+    this.secondaryState.set('IDLE');
+    this.secondaryExtractedBalls.set([]);
+  }
+
+  private updateSceneLayout(width: number, height: number): void {
+    if (!this.camera || !this.machineRoot) {
+      return;
+    }
+
+    if (this.secondaryRig) {
+      const portrait = width < height;
+      const scale = portrait ? 0.42 : 0.62;
+      const separation = portrait ? 9.5 : 10.5;
+      this.machineRoot.scale.setScalar(scale);
+      this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
+      this.secondaryRig.root.scale.setScalar(scale);
+      this.secondaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
+      this.camera.position.set(0, 0, portrait ? 64 : 55);
+    } else {
+      this.machineRoot.scale.setScalar(1);
+      this.machineRoot.position.set(0, 0, 0);
+      this.camera.position.set(0, 0, 48);
+    }
+
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
   }
 
   private arrangeBallsNaturally(): void {
@@ -319,7 +461,7 @@ export class BiomboEngineService {
     pivot.add(sphereAssembly);
     hollow.meshes.forEach((mesh) => sphereAssembly.attach(mesh));
     sphereAssembly.position.copy(this.rotationCenter).sub(meshCenter);
-    this.scene.add(pivot);
+    this.machineRoot.add(pivot);
     this.drumGroup = pivot;
     this.buildMainRotationShaft();
   }
@@ -365,16 +507,16 @@ export class BiomboEngineService {
       bearing.position.set(position, this.rotationCenter.y, this.rotationCenter.z);
       bearing.castShadow = true;
       bearing.receiveShadow = true;
-      this.scene.add(bearing);
+      this.machineRoot.add(bearing);
 
       const mount = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.25, 1.6), bearingMaterial);
       mount.position.set(position, this.rotationCenter.y + 1.03, 0);
       mount.castShadow = true;
       mount.receiveShadow = true;
-      this.scene.add(mount);
+      this.machineRoot.add(mount);
     }
 
-    this.scene.add(shaftAssembly);
+    this.machineRoot.add(shaftAssembly);
     this.mainRotationShaftGroup = shaftAssembly;
   }
 
@@ -386,6 +528,7 @@ export class BiomboEngineService {
     hollowMesh.renderOrder = 10;
 
     const mechanism = new THREE.Group();
+    mechanism.name = 'internal-mechanism';
     mechanism.position.set(0, 0, 0);
     mechanism.renderOrder = 2;
 
@@ -424,6 +567,7 @@ export class BiomboEngineService {
     this.buildInternalSupportTripod(hollowMesh);
 
     const ballGroup = new THREE.Group();
+    ballGroup.name = 'internal-ball-group';
     ballGroup.renderOrder = 3;
     hollowMesh.add(ballGroup);
     this.ballGroup = ballGroup;
@@ -511,6 +655,7 @@ export class BiomboEngineService {
       });
 
       const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+      ball.name = `agitation-ball-${index}`;
       ball.castShadow = true;
       ball.receiveShadow = true;
       ball.renderOrder = 3;
@@ -676,6 +821,8 @@ export class BiomboEngineService {
       }
     }
 
+    this.syncSecondaryAnimation();
+
     // =========================================================================
     // ⚙️ FÍSICA CINEMÁTICA DE BOLAS EXTRAÍDAS EN EL RIEL INFERIOR
     // =========================================================================
@@ -762,48 +909,127 @@ export class BiomboEngineService {
     }
   }
 
+  private syncSecondaryAnimation(): void {
+    if (!this.secondaryRig) {
+      return;
+    }
+
+    const rig = this.secondaryRig;
+    rig.mainRotationAngle = this.mainRotationAngle;
+    rig.mechanismBias = this.mechanismBias;
+    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
+    rig.rotationShaftGroup.rotation.copy(
+      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
+    );
+    if (this.mechanismGroup) {
+      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
+      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
+    }
+
+    this.agitationBalls.forEach((ball, index) => {
+      const secondaryBall = rig.agitationBalls[index];
+      if (!secondaryBall) {
+        return;
+      }
+      secondaryBall.position.copy(ball.position);
+      secondaryBall.quaternion.copy(ball.quaternion);
+      secondaryBall.scale.copy(ball.scale);
+    });
+  }
+
+  public canStartRound(): boolean {
+    const states = [this.state(), ...(this.secondaryRig ? [this.secondaryState()] : [])];
+    return states.every((state) => state === 'IDLE' || state === 'FINISHED');
+  }
+
+  public isRoundFinished(): boolean {
+    return this.state() === 'FINISHED'
+      && (!this.secondaryRig || this.secondaryState() === 'FINISHED');
+  }
+
   public play(): void {
-    if (!this.config || !this.isReady()) {
+    if (!this.config || !this.isReady() || !this.canStartRound()) {
       return;
     }
 
     this.clearTimers();
+    this.clearSecondaryTimers();
     this.clearBallEffects();
     this.extractedBalls.set([]);
     this.state.set('SHUFFLING');
+    this.startRound(
+      this.config,
+      (state) => this.state.set(state),
+      () => this.extractedBalls(),
+      (balls) => this.extractedBalls.set(balls),
+      this.machineRoot,
+      this.agitationBalls,
+      this.drawTimers,
+    );
 
-    const drawSequence = generateBiomboResults(this.config);
+    if (this.secondaryRig) {
+      this.secondaryExtractedBalls.set([]);
+      this.secondaryState.set('SHUFFLING');
+      this.startRound(
+        this.secondaryRig.config,
+        (state) => this.secondaryState.set(state),
+        () => this.secondaryExtractedBalls(),
+        (balls) => this.secondaryExtractedBalls.set(balls),
+        this.secondaryRig.root,
+        this.secondaryRig.agitationBalls,
+        this.secondaryDrawTimers,
+      );
+    }
+  }
+
+  private startRound(
+    config: BiomboConfig,
+    setState: (state: BiomboState) => void,
+    getExtractedBalls: () => number[],
+    setExtractedBalls: (balls: number[]) => void,
+    machineRoot: THREE.Group,
+    agitationBalls: THREE.Mesh[],
+    timers: number[],
+  ): void {
+    const drawSequence = generateBiomboResults(config);
 
     // 1. Fase de agitación completa (8 segundos girando)
     const shuffleTimer = window.setTimeout(() => {
-      this.state.set('PICKING');
+      setState('PICKING');
 
       // 2. Extraer las bolas una por una por el fondo inferior hacia la rampa
       drawSequence.forEach((ballNumber, index) => {
         const timer = window.setTimeout(() => {
-          const current = [...this.extractedBalls()];
+          const current = [...getExtractedBalls()];
           current.push(ballNumber);
-          this.extractedBalls.set(current);
+          setExtractedBalls(current);
 
-          this.spawnBallExitThroughBottom(ballNumber, index);
+          this.spawnBallExitThroughBottom(ballNumber, index, config, machineRoot, agitationBalls);
 
           if (index === drawSequence.length - 1) {
-            window.setTimeout(() => this.state.set('FINISHED'), 2200);
+            const finishTimer = window.setTimeout(() => setState('FINISHED'), 2200);
+            timers.push(finishTimer);
           }
         }, index * 2400); // 2.4s entre cada bola para ver el descenso y rodamiento completo
 
-        this.drawTimers.push(timer);
+        timers.push(timer);
       });
     }, this.shuffleDurationMs);
 
-    this.drawTimers.push(shuffleTimer);
+    timers.push(shuffleTimer);
   }
 
-  private spawnBallExitThroughBottom(ballNumber: number, index: number): void {
+  private spawnBallExitThroughBottom(
+    ballNumber: number,
+    index: number,
+    config: BiomboConfig,
+    machineRoot: THREE.Group,
+    agitationBalls: THREE.Mesh[],
+  ): void {
     const ballRadius = 0.95;
     const ballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
 
-    const numberTexture = this.createBallNumberTexture(ballNumber);
+    const numberTexture = this.createBallNumberTexture(ballNumber, config);
     const material = new THREE.MeshStandardMaterial({
       map: numberTexture,
       roughness: 0.15,
@@ -811,6 +1037,7 @@ export class BiomboEngineService {
     });
 
     const mesh = new THREE.Mesh(ballGeometry, material);
+    mesh.userData['isDrawnBall'] = true;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
@@ -840,10 +1067,10 @@ export class BiomboEngineService {
     ]);
 
     mesh.position.copy(pStart);
-    this.scene.add(mesh);
+    machineRoot.add(mesh);
 
-    if (this.agitationBalls[index]) {
-      this.agitationBalls[index].visible = false;
+    if (agitationBalls[index]) {
+      agitationBalls[index].visible = false;
     }
 
     this.ballEffects.push({
@@ -857,7 +1084,7 @@ export class BiomboEngineService {
     });
   }
 
-  private createBallNumberTexture(value: number): THREE.CanvasTexture {
+  private createBallNumberTexture(value: number, config: BiomboConfig): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
@@ -866,7 +1093,7 @@ export class BiomboEngineService {
       return new THREE.CanvasTexture(canvas);
     }
 
-    const isYellow = this.config?.ballType === 'yellow';
+    const isYellow = config.ballType === 'yellow';
     const baseColor = isYellow ? '#ffd200' : this.agitationPalette[(value - 1) % this.agitationPalette.length];
 
     // Fondo brillante esmaltado
@@ -899,13 +1126,14 @@ export class BiomboEngineService {
   public resize(width: number, height: number): void {
     if (this.renderer && this.camera && height > 0) {
       this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      this.updateSceneLayout(width, height);
       this.renderer.setSize(width, height);
     }
   }
 
   public destroy(): void {
     this.clearTimers();
+    this.clearSecondaryTimers();
     this.clearBallEffects();
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     this.renderer?.dispose();
@@ -916,9 +1144,22 @@ export class BiomboEngineService {
     this.drawTimers = [];
   }
 
-  private clearBallEffects(): void {
+  private clearSecondaryTimers(): void {
+    this.secondaryDrawTimers.forEach((timer) => window.clearTimeout(timer));
+    this.secondaryDrawTimers = [];
+    if (this.secondaryRig) {
+      this.secondaryRig.drawTimers = this.secondaryDrawTimers;
+    }
+  }
+
+  private clearBallEffects(machineRoot?: THREE.Group): void {
+    const remainingEffects: BallExitAnimation[] = [];
     for (const animation of this.ballEffects) {
-      this.scene?.remove(animation.mesh);
+      if (machineRoot && animation.mesh.parent !== machineRoot) {
+        remainingEffects.push(animation);
+        continue;
+      }
+      animation.mesh.parent?.remove(animation.mesh);
       animation.mesh.geometry?.dispose();
       if (Array.isArray(animation.mesh.material)) {
         animation.mesh.material.forEach((mat) => mat.dispose());
@@ -926,9 +1167,10 @@ export class BiomboEngineService {
         animation.mesh.material?.dispose();
       }
     }
-    this.ballEffects = [];
+    this.ballEffects = remainingEffects;
 
     // Restaurar visibilidad de bolas internas para la nueva ronda
     this.agitationBalls.forEach((b) => (b.visible = true));
+    this.secondaryRig?.agitationBalls.forEach((b) => (b.visible = true));
   }
 }

@@ -13,7 +13,7 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
   template: `
     <div class="biombo-stage-wrapper">
       <!-- Visor 3D a pantalla completa -->
-      <app-biombo-canvas [config]="config"></app-biombo-canvas>
+      <app-biombo-canvas [config]="config" [secondaryConfig]="secondaryConfig"></app-biombo-canvas>
 
     <!-- Feedback de Carga / Error -->
       @if (!engine.isReady()) {
@@ -31,12 +31,22 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       }
 
       <!-- HUD Superior Flotante (Glassmorphism) -->
-      <div class="hud-top-bar">
+      <div class="hud-top-bar" [class.dual-hud]="!!secondaryConfig">
         <div class="biombo-meta">
-          <span class="biombo-title">{{ config.title }}</span>
-          <span class="status-pill" [class]="engine.state().toLowerCase()">
-            {{ engine.state() }}
-          </span>
+          <div class="machine-meta">
+            <span class="biombo-title">{{ config.title }}</span>
+            <span class="status-pill" [class]="engine.state().toLowerCase()">
+              {{ engine.state() }}
+            </span>
+          </div>
+          @if (secondaryConfig) {
+            <div class="machine-meta">
+              <span class="biombo-title">{{ secondaryConfig.title }}</span>
+              <span class="status-pill" [class]="engine.secondaryState().toLowerCase()">
+                {{ engine.secondaryState() }}
+              </span>
+            </div>
+          }
         </div>
         <div class="round-info">
           <span>RONDA: 3 BOLAS</span>
@@ -47,9 +57,9 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       <div class="hud-bottom-dock">
         <ion-button
           class="cyber-action-btn"
-          [disabled]="!engine.isReady() || (engine.state() !== 'IDLE' && engine.state() !== 'FINISHED')"
+          [disabled]="!engine.isReady() || !engine.canStartRound()"
           (click)="engine.play()">
-          {{ engine.state() === 'FINISHED' ? 'NUEVA RONDA' : 'INICIAR SORTEO' }}
+          {{ engine.isRoundFinished() ? 'NUEVA RONDA' : 'INICIAR SORTEO' }}
         </ion-button>
       </div>
     </div>
@@ -105,6 +115,19 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       display: flex;
       align-items: center;
       gap: 10px;
+    }
+    .machine-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .dual-hud .biombo-meta {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+    .dual-hud .biombo-title {
+      font-size: 0.78rem;
+      letter-spacing: 0.8px;
     }
     .biombo-title {
       color: #fff;
@@ -170,5 +193,6 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
 })
 export class BiomboCardComponent {
   @Input({ required: true }) config!: BiomboConfig;
+  @Input() secondaryConfig: BiomboConfig | null = null;
   public readonly engine: BiomboEngineService = inject(BiomboEngineService);
 }

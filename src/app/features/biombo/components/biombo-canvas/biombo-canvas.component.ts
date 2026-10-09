@@ -1,4 +1,4 @@
-import { Component, ElementRef, inject, Input, OnDestroy, OnInit, signal, ViewChild } from '@angular/core';
+import { Component, ElementRef, inject, Input, OnChanges, OnDestroy, OnInit, SimpleChanges, signal, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BiomboConfig } from '../../utilities/biombo.interfaces';
 import { BiomboEngineService } from '../../services/biombo-engine.service';
@@ -104,22 +104,31 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
     }
   `]
 })
-export class BiomboCanvasComponent implements OnInit, OnDestroy {
+export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
   @ViewChild('viewport', { static: true }) viewportRef!: ElementRef<HTMLDivElement>;
   @Input({ required: true }) config!: BiomboConfig;
+  @Input() secondaryConfig: BiomboConfig | null = null;
 
   private resizeObserver!: ResizeObserver;
+  private initialized = false;
 
   public readonly engine: BiomboEngineService = inject(BiomboEngineService);
   public readonly hasError = signal(false);
 
+  public ngOnChanges(changes: SimpleChanges): void {
+    if (changes['secondaryConfig'] && this.initialized) {
+      this.engine.setSecondaryConfig(this.secondaryConfig);
+    }
+  }
+
   public async ngOnInit(): Promise<void> {
     try {
-      await this.engine.initialize(this.viewportRef.nativeElement, this.config);
+      await this.engine.initialize(this.viewportRef.nativeElement, this.config, this.secondaryConfig);
       this.hasError.set(!!this.engine.errorMessage());
       if (this.engine.errorMessage()) {
         return;
       }
+      this.initialized = true;
     } catch {
       this.hasError.set(true);
       return;

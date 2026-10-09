@@ -47,16 +47,13 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
     </ion-header>
 
     <ion-content [fullscreen]="true" [scrollY]="false">
-      <div class="viewport-stage" [class.dual-mode]="mode() === 'dual'">
+      <div class="viewport-stage">
         <div class="stage-slot slot-alfa">
-          <app-biombo-card [config]="biomboAlfa"></app-biombo-card>
+          <app-biombo-card
+            [config]="biomboAlfa"
+            [secondaryConfig]="mode() === 'dual' ? biomboBeta : null">
+          </app-biombo-card>
         </div>
-
-        @if (mode() === 'dual') {
-          <div class="stage-slot slot-beta">
-            <app-biombo-card [config]="biomboBeta"></app-biombo-card>
-          </div>
-        }
       </div>
     </ion-content>
   `,
@@ -126,9 +123,6 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
       height: 100%;
       background: #07080b;
       overflow: hidden;
-    }
-    .viewport-stage.dual-mode {
-      grid-template-columns: 1fr 1fr;
     }
     .stage-slot {
       position: relative;
