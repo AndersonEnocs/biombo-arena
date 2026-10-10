@@ -690,7 +690,7 @@ export class BiomboEngineService {
     }
 
     // =========================================================================
-    // 📷 CÁMARA DE SEGUIMIENTO DE BOLAS
+    // 📷 CÁMARA DE SEGUIMIENTO DE BOLAS - SISTEMA MEJORADO
     // =========================================================================
     // Calcular la posición objetivo de la cámara basada en las bolas activas
     if (this.camera && this.controls) {
@@ -699,37 +699,82 @@ export class BiomboEngineService {
       // 1. Priorizar bolas en trayectoria (ballEffects - las que están siendo extraídas)
       if (this.ballEffects.length > 0) {
         let totalWeight = 0;
-        this.ballEffects.forEach((anim) => {
+        
+        // Calcular la bola más activa (la que está en el punto medio de su trayectoria)
+        let mostActiveBallIndex = -1;
+        let maxActivityScore = 0;
+
+        this.ballEffects.forEach((anim, index) => {
           if (!anim.hasSettled) {
+            // Calcular progreso normalizado (0 a 1)
             const easedT = anim.progress < 0.5
               ? 2 * anim.progress * anim.progress
               : 1 - Math.pow(-2 * anim.progress + 2, 2) / 2;
+            
             const currentPos = anim.curve.getPointAt(easedT);
+            
+            // Calcular actividad: máxima cuando la bola está en el punto medio de su trayectoria
+            const activityScore = easedT > 0.3 && easedT < 0.7 ? 1.5 : 1.0;
+            
             targetPos.add(currentPos);
-            totalWeight++;
+            totalWeight += activityScore;
+
+            // Rastrear la bola más activa para seguimiento prioritario
+            if (activityScore > maxActivityScore) {
+              maxActivityScore = activityScore;
+              mostActiveBallIndex = index;
+            }
           }
         });
 
-        // Si hay bolas en trayectoria, usar su posición promedio
+        // Si hay bolas en trayectoria, usar su posición ponderada
         if (totalWeight > 0) {
           targetPos.divideScalar(totalWeight);
+          
+          // Añadir un pequeño offset hacia la bola más activa para seguimiento dinámico
+          if (mostActiveBallIndex !== -1) {
+            const mostActiveAnim = this.ballEffects[mostActiveBallIndex];
+            if (!mostActiveAnim.hasSettled) {
+              const easedT = mostActiveAnim.progress < 0.5
+                ? 2 * mostActiveAnim.progress * mostActiveAnim.progress
+                : 1 - Math.pow(-2 * mostActiveAnim.progress + 2, 2) / 2;
+              const activePos = mostActiveAnim.curve.getPointAt(easedT);
+              targetPos.add(activePos.clone().sub(targetPos).multiplyScalar(0.05));
+            }
+          }
         }
       }
 
       // 2. Si no hay bolas en trayectoria, considerar las bolas en agitación
       if (targetPos.lengthSq() === 0 && this.agitationBallStates.length > 0) {
         let totalWeight = 0;
+        
+        // Priorizar bolas con mayor velocidad (más activas)
+        const activeBalls: { pos: THREE.Vector3; weight: number }[] = [];
+
         this.agitationBallStates.forEach((ballState) => {
           const pos = ballState.mesh.position;
-          // Solo considerar bolas que no estén en reposo absoluto
-          if (ballState.velocity.lengthSq() > 0.1) {
+          const velocity = ballState.velocity;
+          
+          // Calcular peso basado en velocidad (bolas más rápidas tienen más prioridad)
+          const speedWeight = Math.min(velocity.length() / 2.0, 1.5);
+          
+          if (speedWeight > 0.3) { // Solo considerar bolas con velocidad significativa
             targetPos.add(pos);
-            totalWeight++;
+            totalWeight += speedWeight;
+            activeBalls.push({ pos, weight: speedWeight });
           }
         });
 
         if (totalWeight > 0) {
           targetPos.divideScalar(totalWeight);
+          
+          // Si hay múltiples bolas activas, centrarse en la más rápida
+          if (activeBalls.length > 1) {
+            activeBalls.sort((a, b) => b.weight - a.weight);
+            const fastestBall = activeBalls[0];
+            targetPos.add(fastestBall.pos.clone().sub(targetPos).multiplyScalar(0.1));
+          }
         }
       }
 
@@ -738,9 +783,30 @@ export class BiomboEngineService {
         targetPos.set(0, 0, 0);
       }
 
-      // Suavizar el movimiento de la cámara con interpolación lineal (lerp)
-      // El factor 0.1 proporciona un seguimiento suave sin ser demasiado lento
-      this.controls.target.lerp(targetPos, 0.1);
+      // =========================================================================
+      // 🎯 TRANSICIÓN DE CÁMARA INTELIGENTE
+      // =========================================================================
+      // Calcular distancia actual entre cámara y objetivo
+      const cameraTarget = this.controls.target;
+      const distanceToTarget = targetPos.distanceTo(cameraTarget);
+      
+      // Ajustar factor de lerp dinámicamente basado en la distancia
+      // - Si está lejos, usar un factor más bajo para transición suave
+      // - Si está cerca, usar un factor más alto para respuesta rápida
+      let lerpFactor = 0.1;
+      
+      if (distanceToTarget > 5) {
+        // Transición lenta cuando hay distancia significativa
+        lerpFactor = Math.min(0.15, 0.05 + (distanceToTarget / 200));
+      } else if (distanceToTarget < 1) {
+        // Respuesta rápida cuando ya está cerca
+        lerpFactor = Math.max(0.08, 0.2 - distanceToTarget * 0.1);
+      }
+
+      // Aplicar interpolación con factor dinámico
+      this.controls.target.lerp(targetPos, lerpFactor);
+      
+      // Actualizar controles de órbita
       this.controls.update();
     }
 
