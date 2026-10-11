@@ -100,7 +100,8 @@ export class BiomboEngineService {
       this.scene.environment = skyboxTexture;
 
       const aspect = width / height;
-      this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 1000);
+      // Aumentar FOV a 80 grados para mejor visibilidad de las bolas en movimiento
+      this.camera = new THREE.PerspectiveCamera(80, aspect, 0.1, 1000);
       this.camera.position.set(0, 0, 48);
       this.camera.lookAt(0, 0, 0);
 
