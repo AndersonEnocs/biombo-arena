@@ -863,7 +863,7 @@ export class BiomboEngineService {
           anim.mesh.rotation.y += rollSpeed * 0.12;
           anim.mesh.rotation.x = -0.22 * progress;
         } else {
-          // Fase 2 (65% a 100%): Frenado continuo hacia adelante (NUNCA retrocede)
+
           if (anim.startRotZ === undefined || anim.targetRotZ === undefined) {
             anim.startRotZ = anim.mesh.rotation.z;
             anim.startRotY = anim.mesh.rotation.y;
@@ -875,7 +875,10 @@ export class BiomboEngineService {
             if (currentZ - targetZ < Math.PI * 0.9) {
               targetZ -= Math.PI * 2;
             }
-            anim.targetRotZ = targetZ;
+
+            // ⭐ Leve inclinación en Z (-0.072 rad ≈ -4.1°) para calzar con la pendiente del riel
+            const rampInclineAngleZ = -0.072;
+            anim.targetRotZ = targetZ + rampInclineAngleZ;
           }
 
           const blend = (progress - 0.65) / 0.35; // 0 a 1
@@ -1042,21 +1045,42 @@ export class BiomboEngineService {
     mesh.receiveShadow = true;
 
     // =========================================================================
-    // 🎯 FÍSICA DE TOPE: LA 1ª RUEDA HASTA EL FINAL, 2ª Y 3ª SE ACUMULAN A LA IZQUIERDA
+    // 🎯 ENCAJE PROFUNDO DENTRO DEL CANAL (EJE Z HACIA ADENTRO)
     // =========================================================================
-    const trackFloorY = -10.95;
-    const trackZ = 2.45;
+    const endOfTrackX = 19;
+    const endOfTrackY = -12.40;
+    const endOfTrackZ = 0.90; // ⭐ Reducido de 2.10 a 0.90 para meter la bola DETRÁS de la pared frontal del riel
+    const ballSpacing = 2.15;
 
-    const endOfTrackX = 19; // Posición de tope final
-    const ballSpacing = 2.15; // Distancia entre centros de bolas
+    // Pendiente real del riel negro
+    const rampSlopeY = 0.072;
+    const rampSlopeZ = 0.015; // Corrección suave en Z a lo largo del canal
 
     const targetSlotX = endOfTrackX - (index * ballSpacing);
-    const targetSlotPos = new THREE.Vector3(targetSlotX, trackFloorY, trackZ);
+    const deltaX = endOfTrackX - targetSlotX;
 
+    // Altura y profundidad exactas en el interior del canal
+    const targetSlotY = endOfTrackY + (deltaX * rampSlopeY);
+    const targetSlotZ = endOfTrackZ - (deltaX * rampSlopeZ);
+    const targetSlotPos = new THREE.Vector3(targetSlotX, targetSlotY, targetSlotZ);
+
+    // Trayectoria: cae de la esfera y entra al centro del canal
     const pStart = new THREE.Vector3(0, -8.2, 0.2);
-    const pDrop = new THREE.Vector3(0.1, -9.5, 0.9);
-    const pRampEntry = new THREE.Vector3(0.4, -10.5, 1.8);
-    const pRampMid = new THREE.Vector3(Math.max(0.6, targetSlotX * 0.5), -10.85, 2.2);
+    const pDrop = new THREE.Vector3(0.1, -9.8, 0.60); // Cae alineado al centro del canal
+
+    const rampEntryX = 0.4;
+    const pRampEntry = new THREE.Vector3(
+      rampEntryX,
+      endOfTrackY + (endOfTrackX - rampEntryX) * rampSlopeY,
+      endOfTrackZ - (endOfTrackX - rampEntryX) * rampSlopeZ,
+    );
+
+    const midX = Math.max(0.7, targetSlotX * 0.5);
+    const pRampMid = new THREE.Vector3(
+      midX,
+      endOfTrackY + (endOfTrackX - midX) * rampSlopeY,
+      endOfTrackZ - (endOfTrackX - midX) * rampSlopeZ,
+    );
 
     const curve = new THREE.CatmullRomCurve3([
       pStart,
