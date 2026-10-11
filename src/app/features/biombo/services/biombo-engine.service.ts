@@ -691,13 +691,15 @@ export class BiomboEngineService {
     }
 
     // =========================================================================
-    // 📷 CÁMARA DE SEGUIMIENTO DE BOLAS - SISTEMA MEJORADO
+    // 📷 CÁMARA DE SEGUIMIENTO DE BOLAS - SISTEMA OPTIMIZADO
     // =========================================================================
     // Calcular la posición objetivo de la cámara basada en las bolas activas
     if (this.camera && this.controls) {
       const targetPos = new THREE.Vector3();
 
-      // 1. Priorizar bolas en trayectoria (ballEffects - las que están siendo extraídas)
+      // 1. Priorizar bolas en trayectoria (ballEffects - las que están saliendo del biombo)
+      // ⚠️ CRÍTICO: NO seguimos las bolas dentro del biombo (agitationBallStates)
+      // Solo seguimos la cámara cuando hay bolas siendo extraídas
       if (this.ballEffects.length > 0) {
         let totalWeight = 0;
         
@@ -707,7 +709,7 @@ export class BiomboEngineService {
 
         this.ballEffects.forEach((anim, index) => {
           if (!anim.hasSettled) {
-            // Calcular progreso normalizado (0 a 1)
+            // Calcular progreso normalizado (0 a 1) con easing cúbico suave
             const easedT = anim.progress < 0.5
               ? 2 * anim.progress * anim.progress
               : 1 - Math.pow(-2 * anim.progress + 2, 2) / 2;
@@ -715,6 +717,7 @@ export class BiomboEngineService {
             const currentPos = anim.curve.getPointAt(easedT);
             
             // Calcular actividad: máxima cuando la bola está en el punto medio de su trayectoria
+            // Esto asegura que la cámara siga la bola mientras sale del biombo
             const activityScore = easedT > 0.3 && easedT < 0.7 ? 1.5 : 1.0;
             
             targetPos.add(currentPos);
@@ -746,66 +749,70 @@ export class BiomboEngineService {
         }
       }
 
-      // 2. Si no hay bolas en trayectoria, considerar las bolas en agitación
-      if (targetPos.lengthSq() === 0 && this.agitationBallStates.length > 0) {
-        let totalWeight = 0;
-        
-        // Priorizar bolas con mayor velocidad (más activas)
-        const activeBalls: { pos: THREE.Vector3; weight: number }[] = [];
-
-        this.agitationBallStates.forEach((ballState) => {
-          const pos = ballState.mesh.position;
-          const velocity = ballState.velocity;
-          
-          // Calcular peso basado en velocidad (bolas más rápidas tienen más prioridad)
-          const speedWeight = Math.min(velocity.length() / 2.0, 1.5);
-          
-          if (speedWeight > 0.3) { // Solo considerar bolas con velocidad significativa
-            targetPos.add(pos);
-            totalWeight += speedWeight;
-            activeBalls.push({ pos, weight: speedWeight });
-          }
-        });
-
-        if (totalWeight > 0) {
-          targetPos.divideScalar(totalWeight);
-          
-          // Si hay múltiples bolas activas, centrarse en la más rápida
-          if (activeBalls.length > 1) {
-            activeBalls.sort((a, b) => b.weight - a.weight);
-            const fastestBall = activeBalls[0];
-            targetPos.add(fastestBall.pos.clone().sub(targetPos).multiplyScalar(0.1));
-          }
-        }
-      }
-
-      // 3. Si aún no hay posición válida, usar el centro de la escena como fallback
+      // 2. Fallback: Si no hay bolas en trayectoria, usar el centro de la escena
+      // ⚠️ IMPORTANTE: NO seguimos las bolas dentro del biombo (agitationBallStates)
       if (targetPos.lengthSq() === 0) {
         targetPos.set(0, 0, 0);
       }
 
       // =========================================================================
-      // 🎯 TRANSICIÓN DE CÁMARA INTELIGENTE
+      // 🎯 TRANSICIÓN DE CÁMARA INTELIGENTE CON ZOOM SUAVE
       // =========================================================================
       // Calcular distancia actual entre cámara y objetivo
       const cameraTarget = this.controls.target;
       const distanceToTarget = targetPos.distanceTo(cameraTarget);
       
-      // Ajustar factor de lerp dinámicamente basado en la distancia
-      // - Si está lejos, usar un factor más bajo para transición suave
-      // - Si está cerca, usar un factor más alto para respuesta rápida
-      let lerpFactor = 0.1;
+      // Ajustar factor de lerp dinámicamente basado en la distancia para transición ultra-suave
+      let lerpFactor = 0.08; // Factor base más suave
       
       if (distanceToTarget > 5) {
         // Transición lenta cuando hay distancia significativa
-        lerpFactor = Math.min(0.15, 0.05 + (distanceToTarget / 200));
+        lerpFactor = Math.min(0.12, 0.04 + (distanceToTarget / 250));
       } else if (distanceToTarget < 1) {
         // Respuesta rápida cuando ya está cerca
-        lerpFactor = Math.max(0.08, 0.2 - distanceToTarget * 0.1);
+        lerpFactor = Math.max(0.1, 0.25 - distanceToTarget * 0.1);
       }
 
-      // Aplicar interpolación con factor dinámico
+      // Aplicar interpolación con factor dinámico para el objetivo
       this.controls.target.lerp(targetPos, lerpFactor);
+      
+      // 🎯 ZOOM SUAVE HACIA LA ESFERA CUANDO LAS BOLAS SALEN DEL BIOMBO
+      // Calcular la distancia actual de la cámara al centro de la esfera
+      const cameraDistance = this.camera.position.length();
+      const targetDistance = 35; // Distancia óptima para ver la esfera completa con zoom
+      
+      // Crear una transición ultra-suave hacia la distancia objetivo usando easing cúbico
+      const distanceDiff = targetDistance - cameraDistance;
+      
+      // Factor de zoom dinámico: más rápido cuando hay bolas activas
+      let zoomFactor = 0.015; // Zoom suave por defecto
+      
+      if (this.ballEffects.length > 0 && !this.ballEffects[0]?.hasSettled) {
+        // Hay bolas saliendo del biombo: acelerar el zoom con transición suave
+        const easeZoom = distanceDiff < 0 ? 1 - Math.pow(distanceDiff * 0.5, 2) : 1;
+        zoomFactor = Math.min(0.04, 0.008 + (distanceDiff * 0.015) * easeZoom);
+        
+        // Acelerar más si la bola está en fase activa de salida
+        if (distanceToTarget > 2 && distanceToTarget < 15) {
+          zoomFactor = Math.min(0.06, zoomFactor + 0.015);
+        }
+      } else if (distanceDiff < 0) {
+        // Estamos más cerca de lo objetivo: volver lentamente a la distancia normal
+        const returnFactor = Math.max(0.003, -distanceDiff * 0.003);
+        this.camera.position.lerpVectors(
+          this.camera.position.clone().normalize().multiplyScalar(cameraDistance),
+          this.camera.position.clone().normalize().multiplyScalar(targetDistance),
+          returnFactor
+        );
+      } else if (distanceDiff > 0) {
+        // Estamos más lejos: acercarnos suavemente con easing cúbico
+        const easeIn = distanceDiff < 20 ? 1 : Math.pow(distanceDiff / 20, 2);
+        this.camera.position.lerpVectors(
+          this.camera.position.clone().normalize().multiplyScalar(cameraDistance),
+          this.camera.position.clone().normalize().multiplyScalar(targetDistance),
+          zoomFactor * (1 - easeIn)
+        );
+      }
       
       // Actualizar controles de órbita
       this.controls.update();
