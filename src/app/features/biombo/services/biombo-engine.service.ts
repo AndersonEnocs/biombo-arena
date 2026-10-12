@@ -115,6 +115,15 @@ export class BiomboEngineService {
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
 
+      const classicTexture = await new Promise<THREE.Texture>((resolve, reject) => {
+        new THREE.TextureLoader()
+          .load('/assets/skybox/casino/casino2.png', (texture) => resolve(texture),
+            undefined,
+            (error) => reject(error)
+          );
+      });
+      this.scene.background = classicTexture;
+      // Mantener el skybox hallway para la iluminación (environment)
       const skyboxTexture = await new Promise<THREE.CubeTexture>((resolve, reject) => {
         new THREE.CubeTextureLoader()
           .setPath('/assets/skybox/hallway/')
@@ -125,7 +134,6 @@ export class BiomboEngineService {
             (error) => reject(error)
           );
       });
-      this.scene.background = skyboxTexture;
       this.scene.environment = skyboxTexture;
 
       const aspect = width / height;
