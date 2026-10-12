@@ -69,6 +69,9 @@ export class BiomboEngineService {
   private lastAgitationFrame = 0;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
+  private readonly cameraLookTarget = new THREE.Vector3();
+  private readonly cameraFollowTarget = new THREE.Vector3();
+  private readonly cameraFollowDelta = new THREE.Vector3();
 
   private readonly agitationPalette = [
     0x00d2ff, // Azul cian
@@ -362,6 +365,7 @@ export class BiomboEngineService {
     }
 
     this.camera.lookAt(0, 0, 0);
+    this.cameraLookTarget.set(0, 0, 0);
     this.camera.updateProjectionMatrix();
   }
 
@@ -906,6 +910,27 @@ export class BiomboEngineService {
         }
       }
     }
+
+    const isPicking = this.state() === 'PICKING' || this.secondaryState() === 'PICKING';
+    let latestBallEffect: BallExitAnimation | undefined;
+    for (const effect of this.ballEffects) {
+      if (!latestBallEffect || effect.startAt > latestBallEffect.startAt) {
+        latestBallEffect = effect;
+      }
+    }
+
+    this.cameraFollowTarget.set(0, 0, 0);
+    if (isPicking && latestBallEffect) {
+      latestBallEffect.mesh.getWorldPosition(this.cameraFollowTarget);
+    }
+
+    const followAlpha = 1 - Math.exp(-4 * deltaSeconds);
+    this.cameraFollowDelta
+      .subVectors(this.cameraFollowTarget, this.cameraLookTarget)
+      .multiplyScalar(followAlpha);
+    this.camera.position.add(this.cameraFollowDelta);
+    this.cameraLookTarget.add(this.cameraFollowDelta);
+    this.camera.lookAt(this.cameraLookTarget);
 
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
