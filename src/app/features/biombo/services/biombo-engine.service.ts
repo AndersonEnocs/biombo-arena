@@ -1,6 +1,5 @@
 import { inject, Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RapierLoaderService } from '../../../core/services/rapier-loader.service';
 import { SolidEntity } from '../models/solid.entity';
 import { BiomboConfig, BiomboState, generateBiomboResults } from '../utilities/biombo.interfaces';
@@ -51,6 +50,7 @@ export class BiomboEngineService {
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
+  private backgroundTexture?: THREE.CubeTexture;
   private animFrameId: number | null = null;
   private solids: { [key: string]: SolidEntity } = {};
   private config: BiomboConfig | null = null;
@@ -108,21 +108,22 @@ export class BiomboEngineService {
       const height = container.clientHeight || window.innerHeight;
 
       this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0x0a0c10);
+      this.backgroundTexture = await new Promise<THREE.CubeTexture>((resolve, reject) => {
+        new THREE.CubeTextureLoader()
+          .setPath('/assets/skybox/hallway/')
+          .load(
+            ['posx.png', 'negx.png', 'posy.png', 'negy.png', 'posz.png', 'negz.png'],
+            resolve,
+            undefined,
+            reject,
+          );
+      });
+      this.backgroundTexture.colorSpace = THREE.SRGBColorSpace;
+      this.scene.background = this.backgroundTexture;
+      this.scene.environment = this.backgroundTexture;
       this.machineRoot = new THREE.Group();
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
-
-      const backgroundModel = await new Promise<THREE.Group>((resolve, reject) => {
-        new GLTFLoader().load(
-          '/assets/loteria.glb',
-          (gltf) => resolve(gltf.scene),
-          undefined,
-          (error) => reject(error),
-        );
-      });
-      backgroundModel.position.z = -30;
-      this.scene.add(backgroundModel);
 
       const aspect = width / height;
       this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 1000);
@@ -1160,6 +1161,8 @@ export class BiomboEngineService {
     this.clearBallEffects();
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     this.renderer?.dispose();
+    this.backgroundTexture?.dispose();
+    this.backgroundTexture = undefined;
   }
 
   private clearTimers(): void {
