@@ -108,6 +108,7 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
   @ViewChild('viewport', { static: true }) viewportRef!: ElementRef<HTMLDivElement>;
   @Input({ required: true }) config!: BiomboConfig;
   @Input() secondaryConfig: BiomboConfig | null = null;
+  @Input() tertiaryConfig: BiomboConfig | null = null;
 
   private resizeObserver!: ResizeObserver;
   private initialized = false;
@@ -119,11 +120,19 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
     if (changes['secondaryConfig'] && this.initialized) {
       this.engine.setSecondaryConfig(this.secondaryConfig);
     }
+    if (changes['tertiaryConfig'] && this.initialized) {
+      this.engine.setTertiaryConfig(this.tertiaryConfig);
+    }
   }
 
   public async ngOnInit(): Promise<void> {
     try {
-      await this.engine.initialize(this.viewportRef.nativeElement, this.config, this.secondaryConfig);
+      await this.engine.initialize(
+        this.viewportRef.nativeElement,
+        this.config,
+        this.secondaryConfig,
+        this.tertiaryConfig,
+      );
       this.hasError.set(!!this.engine.errorMessage());
       if (this.engine.errorMessage()) {
         return;

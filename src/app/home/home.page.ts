@@ -41,6 +41,9 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
             <ion-segment-button value="dual">
               <ion-label>2 BIOMBOS (DUAL ARENA)</ion-label>
             </ion-segment-button>
+            <ion-segment-button value="triple">
+              <ion-label>3 BIOMBOS (TRIFÁSICA)</ion-label>
+            </ion-segment-button>
           </ion-segment>
         </div>
       </ion-toolbar>
@@ -51,7 +54,8 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
         <div class="stage-slot slot-alfa">
           <app-biombo-card
             [config]="biomboAlfa"
-            [secondaryConfig]="mode() === 'dual' ? biomboBeta : null">
+            [secondaryConfig]="mode() !== 'single' ? biomboBeta : null"
+            [tertiaryConfig]="mode() === 'triple' ? biomboGamma : null">
           </app-biombo-card>
         </div>
       </div>
@@ -103,7 +107,7 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
       50% { opacity: 0.4; transform: scale(0.85); }
     }
     .mode-segment {
-      max-width: 380px;
+      max-width: 560px;
       --background: rgba(255, 255, 255, 0.04);
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.06);
@@ -115,6 +119,38 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
       font-size: 0.75rem;
       font-weight: 700;
       letter-spacing: 1px;
+    }
+    @media (max-width: 800px) {
+      :host {
+        --header-h: 108px;
+      }
+      .header-container {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 8px 12px;
+      }
+      .brand {
+        justify-content: center;
+      }
+      .brand h2 {
+        font-size: 0.8rem;
+        letter-spacing: 1.5px;
+      }
+      .mode-segment {
+        width: 100%;
+        max-width: none;
+      }
+      ion-segment-button {
+        --padding-start: 2px;
+        --padding-end: 2px;
+        font-size: 0.62rem;
+        letter-spacing: 0.2px;
+      }
+      ion-segment-button ion-label {
+        white-space: normal;
+        line-height: 1.2;
+      }
     }
     .viewport-stage {
       display: grid;
@@ -134,7 +170,7 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
   `],
 })
 export class HomePage {
-  public mode = signal<'single' | 'dual'>('single');
+  public mode = signal<'single' | 'dual' | 'triple'>('single');
 
   public biomboAlfa: BiomboConfig = {
     id: 'biombo-alfa',
@@ -150,5 +186,13 @@ export class HomePage {
     ballAmount: 30,
     resultCount: 3, // Regla estricta: 3 bolas
     ballType: 'yellow',
+  };
+
+  public biomboGamma: BiomboConfig = {
+    id: 'biombo-gamma',
+    title: 'BIOMBO GAMMA',
+    ballAmount: 30,
+    resultCount: 3,
+    ballType: 'color',
   };
 }

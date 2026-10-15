@@ -1,5 +1,6 @@
 import { inject, Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RapierLoaderService } from '../../../core/services/rapier-loader.service';
 import { SolidEntity } from '../models/solid.entity';
 import { BiomboConfig, BiomboState, generateBiomboResults } from '../utilities/biombo.interfaces';
@@ -38,6 +39,8 @@ type SecondaryBiomboRig = {
   mechanismBias: number;
 };
 
+type TertiaryBiomboRig = SecondaryBiomboRig;
+
 @Injectable()
 export class BiomboEngineService {
   public readonly isReady = signal(false);
@@ -46,6 +49,8 @@ export class BiomboEngineService {
   public readonly state = signal<BiomboState>('IDLE');
   public readonly secondaryExtractedBalls = signal<number[]>([]);
   public readonly secondaryState = signal<BiomboState>('IDLE');
+  public readonly tertiaryExtractedBalls = signal<number[]>([]);
+  public readonly tertiaryState = signal<BiomboState>('IDLE');
 
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
@@ -56,8 +61,10 @@ export class BiomboEngineService {
   private config: BiomboConfig | null = null;
   private machineRoot!: THREE.Group;
   private secondaryRig?: SecondaryBiomboRig;
+  private tertiaryRig?: TertiaryBiomboRig;
   private drawTimers: number[] = [];
   private secondaryDrawTimers: number[] = [];
+  private tertiaryDrawTimers: number[] = [];
   private ballEffects: BallExitAnimation[] = [];
   private drumGroup?: THREE.Group;
   private mainRotationShaftGroup?: THREE.Group;
@@ -89,19 +96,25 @@ export class BiomboEngineService {
     container: HTMLElement,
     config: BiomboConfig,
     secondaryConfig: BiomboConfig | null = null,
+    tertiaryConfig: BiomboConfig | null = null,
   ): Promise<void> {
     this.config = config;
     this.secondaryRig = undefined;
+    this.tertiaryRig = undefined;
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
     this.extractedBalls.set([]);
     this.state.set('IDLE');
     this.secondaryExtractedBalls.set([]);
     this.secondaryState.set('IDLE');
+    this.tertiaryExtractedBalls.set([]);
+    this.tertiaryState.set('IDLE');
     this.errorMessage.set(null);
     this.mainRotationAngle = 0;
     this.clearBallEffects();
 
     try {
+      // this.inspectLoteriaGlb(); // Temporal: permite inspeccionar el GLB aunque WebGL no esté disponible.
       const rapier = await (this.rapierLoader as any).getRapier?.() ?? await (this.rapierLoader as any).load?.();
 
       const width = container.clientWidth || window.innerWidth;
@@ -131,13 +144,10 @@ export class BiomboEngineService {
       this.camera.lookAt(0, 0, 0);
 
       const probeCanvas = document.createElement('canvas');
-      const probeContext =
-        probeCanvas.getContext('webgl2') ??
-        probeCanvas.getContext('webgl') ??
-        probeCanvas.getContext('experimental-webgl');
-
-      if (!probeContext) {
-        throw new Error('Tu navegador o el entorno actual no soportan WebGL.');
+      if (!probeCanvas.getContext('webgl2')) {
+        throw new Error(
+          'WebGL 2 no está disponible en este navegador. Activa la aceleración por hardware o prueba en un navegador con WebGL 2 habilitado.',
+        );
       }
 
       this.renderer = new THREE.WebGLRenderer({
@@ -244,9 +254,13 @@ export class BiomboEngineService {
       if (secondaryConfig) {
         this.createSecondaryRig(secondaryConfig);
       }
+      if (tertiaryConfig) {
+        this.createTertiaryRig(tertiaryConfig);
+      }
       this.updateSceneLayout(width, height);
 
       this.ngZone.runOutsideAngular(() => this.animate());
+
       this.isReady.set(true);
     } catch (err: any) {
       const message = err?.message || 'Error al cargar modelos';
@@ -341,20 +355,116 @@ export class BiomboEngineService {
     this.secondaryExtractedBalls.set([]);
   }
 
+  public setTertiaryConfig(config: BiomboConfig | null): void {
+    if (!this.isReady() || !this.scene || !this.machineRoot) {
+      return;
+    }
+
+    if (!config) {
+      this.clearTertiaryTimers();
+      if (this.tertiaryRig) {
+        this.clearBallEffects(this.tertiaryRig.root);
+        this.scene.remove(this.tertiaryRig.root);
+        this.tertiaryRig = undefined;
+      }
+      this.tertiaryState.set('IDLE');
+      this.tertiaryExtractedBalls.set([]);
+      this.updateSceneLayout(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+      return;
+    }
+
+    if (this.tertiaryRig?.config.id === config.id) {
+      this.tertiaryRig.config = config;
+      return;
+    }
+
+    this.clearTertiaryTimers();
+    if (this.tertiaryRig) {
+      this.clearBallEffects(this.tertiaryRig.root);
+      this.scene.remove(this.tertiaryRig.root);
+    }
+    this.tertiaryState.set('IDLE');
+    this.tertiaryExtractedBalls.set([]);
+    this.createTertiaryRig(config);
+    this.updateSceneLayout(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+  }
+
+  private createTertiaryRig(config: BiomboConfig): void {
+    const root = this.machineRoot.clone(true);
+    root.name = 'biombo-machine-gamma';
+    const drawnBalls: THREE.Object3D[] = [];
+    root.traverse((object) => {
+      if (object.userData['isDrawnBall']) {
+        drawnBalls.push(object);
+      }
+    });
+    drawnBalls.forEach((ball) => ball.parent?.remove(ball));
+
+    const drumGroup = root.getObjectByName('sphere-rotation-pivot');
+    const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
+    const mechanismGroup = root.getObjectByName('internal-mechanism');
+    if (!(drumGroup instanceof THREE.Group)
+      || !(rotationShaftGroup instanceof THREE.Group)
+      || !(mechanismGroup instanceof THREE.Group)) {
+      throw new Error('No se pudo preparar el tercer biombo.');
+    }
+
+    const agitationBalls = this.agitationBalls.map((_, index) => {
+      const ball = root.getObjectByName(`agitation-ball-${index}`);
+      if (!(ball instanceof THREE.Mesh)) {
+        throw new Error('No se pudo preparar el conjunto de bolas del tercer biombo.');
+      }
+      ball.visible = true;
+      return ball;
+    });
+
+    this.tertiaryRig = {
+      config,
+      root,
+      drumGroup,
+      rotationShaftGroup,
+      mechanismGroup,
+      agitationBalls,
+      agitationBallStates: agitationBalls.map((mesh, index) => ({
+        mesh,
+        velocity: new THREE.Vector3(),
+        phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
+        radius: this.agitationBallStates[index]?.radius ?? 0.92,
+      })),
+      drawTimers: this.tertiaryDrawTimers,
+      mainRotationAngle: this.mainRotationAngle,
+      mechanismBias: this.mechanismBias,
+    };
+    this.scene.add(root);
+    this.tertiaryState.set('IDLE');
+    this.tertiaryExtractedBalls.set([]);
+  }
+
   private updateSceneLayout(width: number, height: number): void {
     if (!this.camera || !this.machineRoot) {
       return;
     }
 
-    if (this.secondaryRig) {
+    if (this.tertiaryRig) {
+      const portrait = width < height;
+      const scale = portrait ? 0.34 : 0.42;
+      const separation = portrait ? 15.5 : 17.5;
+      this.machineRoot.scale.setScalar(scale);
+      this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
+      this.secondaryRig?.root.scale.setScalar(scale);
+      this.secondaryRig?.root.position.set(0, 0, 0);
+      this.tertiaryRig.root.scale.setScalar(scale);
+      this.tertiaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
+      this.camera.position.set(0, 0, portrait ? 70 : 64);
+    } else if (this.secondaryRig) {
       const portrait = width < height;
       const scale = portrait ? 0.42 : 0.62;
-      const separation = portrait ? 9.5 : 10.5;
+      const separation = portrait ? 12 : 13;
       this.machineRoot.scale.setScalar(scale);
       this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
       this.secondaryRig.root.scale.setScalar(scale);
       this.secondaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
-      this.camera.position.set(0, 0, portrait ? 64 : 55);
+      this.camera.position.set(0, 0, portrait ? 67 : 59);
     } else {
       this.machineRoot.scale.setScalar(1);
       this.machineRoot.position.set(0, 0, 0);
@@ -938,16 +1048,50 @@ export class BiomboEngineService {
       secondaryBall.quaternion.copy(ball.quaternion);
       secondaryBall.scale.copy(ball.scale);
     });
+    this.syncTertiaryAnimation();
+  }
+
+  private syncTertiaryAnimation(): void {
+    if (!this.tertiaryRig) {
+      return;
+    }
+
+    const rig = this.tertiaryRig;
+    rig.mainRotationAngle = this.mainRotationAngle;
+    rig.mechanismBias = this.mechanismBias;
+    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
+    rig.rotationShaftGroup.rotation.copy(
+      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
+    );
+    if (this.mechanismGroup) {
+      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
+      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
+    }
+
+    this.agitationBalls.forEach((ball, index) => {
+      const tertiaryBall = rig.agitationBalls[index];
+      if (!tertiaryBall) {
+        return;
+      }
+      tertiaryBall.position.copy(ball.position);
+      tertiaryBall.quaternion.copy(ball.quaternion);
+      tertiaryBall.scale.copy(ball.scale);
+    });
   }
 
   public canStartRound(): boolean {
-    const states = [this.state(), ...(this.secondaryRig ? [this.secondaryState()] : [])];
+    const states = [
+      this.state(),
+      ...(this.secondaryRig ? [this.secondaryState()] : []),
+      ...(this.tertiaryRig ? [this.tertiaryState()] : []),
+    ];
     return states.every((state) => state === 'IDLE' || state === 'FINISHED');
   }
 
   public isRoundFinished(): boolean {
     return this.state() === 'FINISHED'
-      && (!this.secondaryRig || this.secondaryState() === 'FINISHED');
+      && (!this.secondaryRig || this.secondaryState() === 'FINISHED')
+      && (!this.tertiaryRig || this.tertiaryState() === 'FINISHED');
   }
 
   public play(): void {
@@ -957,6 +1101,7 @@ export class BiomboEngineService {
 
     this.clearTimers();
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
     this.clearBallEffects();
     this.extractedBalls.set([]);
     this.state.set('SHUFFLING');
@@ -981,6 +1126,20 @@ export class BiomboEngineService {
         this.secondaryRig.root,
         this.secondaryRig.agitationBalls,
         this.secondaryDrawTimers,
+      );
+    }
+
+    if (this.tertiaryRig) {
+      this.tertiaryExtractedBalls.set([]);
+      this.tertiaryState.set('SHUFFLING');
+      this.startRound(
+        this.tertiaryRig.config,
+        (state) => this.tertiaryState.set(state),
+        () => this.tertiaryExtractedBalls(),
+        (balls) => this.tertiaryExtractedBalls.set(balls),
+        this.tertiaryRig.root,
+        this.tertiaryRig.agitationBalls,
+        this.tertiaryDrawTimers,
       );
     }
   }
@@ -1158,6 +1317,7 @@ export class BiomboEngineService {
   public destroy(): void {
     this.clearTimers();
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
     this.clearBallEffects();
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     this.renderer?.dispose();
@@ -1175,6 +1335,14 @@ export class BiomboEngineService {
     this.secondaryDrawTimers = [];
     if (this.secondaryRig) {
       this.secondaryRig.drawTimers = this.secondaryDrawTimers;
+    }
+  }
+
+  private clearTertiaryTimers(): void {
+    this.tertiaryDrawTimers.forEach((timer) => window.clearTimeout(timer));
+    this.tertiaryDrawTimers = [];
+    if (this.tertiaryRig) {
+      this.tertiaryRig.drawTimers = this.tertiaryDrawTimers;
     }
   }
 
@@ -1198,5 +1366,44 @@ export class BiomboEngineService {
     // Restaurar visibilidad de bolas internas para la nueva ronda
     this.agitationBalls.forEach((b) => (b.visible = true));
     this.secondaryRig?.agitationBalls.forEach((b) => (b.visible = true));
+    this.tertiaryRig?.agitationBalls.forEach((b) => (b.visible = true));
   }
+
+  //   // Temporary asset inspection helper.
+  //   public inspectLoteriaGlb(): void {
+  //     const loader = new GLTFLoader();
+  //     const assetUrl = new URL('assets/loteria.glb', document.baseURI).href;
+
+  //     console.info('Iniciando inspección de loteria.glb:', assetUrl);
+  //     loader.load(
+  //       assetUrl,
+  //       (gltf) => {
+  //         console.group('🎯 INSPECCIÓN QUIRÚRGICA: loteria.glb');
+  //         console.log('Escena GLTF completa:', gltf);
+
+  //         const nodes: { name: string; type: string; parent: string }[] = [];
+  //         gltf.scene.traverse((child) => {
+  //           nodes.push({
+  //             name: child.name || '(sin nombre)',
+  //             type: child.type,
+  //             parent: child.parent?.name || 'Scene',
+  //           });
+  //         });
+
+  //         console.table(nodes);
+  //         console.groupEnd();
+  //       },
+  //       (progress) => {
+  //         if (progress.total > 0) {
+  //           const percent = (progress.loaded / progress.total) * 100;
+  //           console.log(`Cargando loteria.glb: ${percent.toFixed(1)}%`);
+  //         } else {
+  //           console.log(`Cargando loteria.glb: ${progress.loaded} bytes`);
+  //         }
+  //       },
+  //       (error) => {
+  //         console.error(`Error al inspeccionar loteria.glb (${assetUrl}):`, error);
+  //       }
+  //     );
+  //   }
 }

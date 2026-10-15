@@ -13,7 +13,11 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
   template: `
     <div class="biombo-stage-wrapper">
       <!-- Visor 3D a pantalla completa -->
-      <app-biombo-canvas [config]="config" [secondaryConfig]="secondaryConfig"></app-biombo-canvas>
+      <app-biombo-canvas
+        [config]="config"
+        [secondaryConfig]="secondaryConfig"
+        [tertiaryConfig]="tertiaryConfig">
+      </app-biombo-canvas>
 
     <!-- Feedback de Carga / Error -->
       @if (!engine.isReady()) {
@@ -31,7 +35,7 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       }
 
       <!-- HUD Superior Flotante (Glassmorphism) -->
-      <div class="hud-top-bar" [class.dual-hud]="!!secondaryConfig">
+      <div class="hud-top-bar" [class.dual-hud]="!!secondaryConfig" [class.triple-hud]="!!tertiaryConfig">
         <div class="biombo-meta">
           <div class="machine-meta">
             <span class="biombo-title">{{ config.title }}</span>
@@ -44,6 +48,14 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
               <span class="biombo-title">{{ secondaryConfig.title }}</span>
               <span class="status-pill" [class]="engine.secondaryState().toLowerCase()">
                 {{ engine.secondaryState() }}
+              </span>
+            </div>
+          }
+          @if (tertiaryConfig) {
+            <div class="machine-meta">
+              <span class="biombo-title">{{ tertiaryConfig.title }}</span>
+              <span class="status-pill" [class]="engine.tertiaryState().toLowerCase()">
+                {{ engine.tertiaryState() }}
               </span>
             </div>
           }
@@ -129,6 +141,25 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       font-size: 0.78rem;
       letter-spacing: 0.8px;
     }
+    .triple-hud {
+      gap: 8px;
+      padding: 8px 12px;
+    }
+    .triple-hud .biombo-meta {
+      flex-wrap: wrap;
+      gap: 6px 10px;
+    }
+    .triple-hud .machine-meta {
+      gap: 6px;
+    }
+    .triple-hud .biombo-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.5px;
+    }
+    .triple-hud .status-pill {
+      font-size: 0.58rem;
+      padding: 3px 6px;
+    }
     .biombo-title {
       color: #fff;
       font-weight: 800;
@@ -194,5 +225,6 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
 export class BiomboCardComponent {
   @Input({ required: true }) config!: BiomboConfig;
   @Input() secondaryConfig: BiomboConfig | null = null;
+  @Input() tertiaryConfig: BiomboConfig | null = null;
   public readonly engine: BiomboEngineService = inject(BiomboEngineService);
 }
