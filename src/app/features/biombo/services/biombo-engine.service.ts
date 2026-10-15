@@ -1,5 +1,6 @@
 import { inject, Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RapierLoaderService } from '../../../core/services/rapier-loader.service';
 import { SolidEntity } from '../models/solid.entity';
 import { BiomboConfig, BiomboState, generateBiomboResults } from '../utilities/biombo.interfaces';
@@ -112,18 +113,16 @@ export class BiomboEngineService {
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
 
-      const skyboxTexture = await new Promise<THREE.CubeTexture>((resolve, reject) => {
-        new THREE.CubeTextureLoader()
-          .setPath('/assets/skybox/hallway/')
-          .load(
-            ['posx.png', 'negx.png', 'posy.png', 'negy.png', 'posz.png', 'negz.png'],
-            (texture) => resolve(texture),
-            undefined,
-            (error) => reject(error)
-          );
+      const backgroundModel = await new Promise<THREE.Group>((resolve, reject) => {
+        new GLTFLoader().load(
+          '/assets/loteria.glb',
+          (gltf) => resolve(gltf.scene),
+          undefined,
+          (error) => reject(error),
+        );
       });
-      this.scene.background = skyboxTexture;
-      this.scene.environment = skyboxTexture;
+      backgroundModel.position.z = -30;
+      this.scene.add(backgroundModel);
 
       const aspect = width / height;
       this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 1000);
