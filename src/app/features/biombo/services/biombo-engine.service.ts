@@ -74,6 +74,7 @@ export class BiomboEngineService {
   private mechanismBias = 0;
   private agitationBalls: THREE.Mesh[] = [];
   private agitationBallStates: AgitationBallState[] = [];
+  private agitationBallTemplates: THREE.Mesh[] = [];
   private lastAgitationFrame = 0;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
@@ -248,6 +249,20 @@ export class BiomboEngineService {
       }
       ornaments.meshes.forEach((mesh) => this.machineRoot.add(mesh));
       ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
+
+      const lotteryModel = await new GLTFLoader().loadAsync('/assets/loteria.glb');
+      this.agitationBallTemplates = [];
+      lotteryModel.scene.traverse((object) => {
+        if (object instanceof THREE.Mesh && /^Ball_\d+$/.test(object.name)) {
+          this.agitationBallTemplates.push(object);
+        }
+      });
+      this.agitationBallTemplates.sort(
+        (first, second) => Number(first.name.slice(5)) - Number(second.name.slice(5)),
+      );
+      if (this.agitationBallTemplates.length === 0) {
+        throw new Error('No se encontraron pelotas numeradas en loteria.glb.');
+      }
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
@@ -755,16 +770,19 @@ export class BiomboEngineService {
     const total = 24;
     for (let index = 0; index < total; index++) {
       const ballRadius = 0.92;
-      const ballGeometry = new THREE.SphereGeometry(ballRadius, 24, 24);
-
-      // Textura esmaltada vibrante con acabado pulido de casino
-      const ballMaterial = new THREE.MeshStandardMaterial({
-        color: this.agitationPalette[index % this.agitationPalette.length],
-        roughness: 0.18,
-        metalness: 0.08,
-      });
-
+      const template = this.agitationBallTemplates[index % this.agitationBallTemplates.length];
+      const ballGeometry = template.geometry.clone();
+      ballGeometry.computeBoundingSphere();
+      const sourceRadius = ballGeometry.boundingSphere?.radius;
+      if (!sourceRadius || sourceRadius <= 0) {
+        throw new Error(`La pelota ${template.name} de loteria.glb no tiene un tamaño válido.`);
+      }
+      const ballMaterial = Array.isArray(template.material)
+        ? template.material.map((material) => material.clone())
+        : template.material.clone();
       const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+      ball.quaternion.copy(template.quaternion);
+      ball.scale.setScalar(ballRadius / sourceRadius);
       ball.name = `agitation-ball-${index}`;
       ball.castShadow = true;
       ball.receiveShadow = true;
