@@ -109,6 +109,7 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
   @Input({ required: true }) config!: BiomboConfig;
   @Input() secondaryConfig: BiomboConfig | null = null;
   @Input() tertiaryConfig: BiomboConfig | null = null;
+  @Input() quaternaryConfig: BiomboConfig | null = null;
 
   private resizeObserver!: ResizeObserver;
   private initialized = false;
@@ -123,6 +124,9 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
     if (changes['tertiaryConfig'] && this.initialized) {
       this.engine.setTertiaryConfig(this.tertiaryConfig);
     }
+    if (changes['quaternaryConfig'] && this.initialized) {
+      this.engine.setQuaternaryConfig(this.quaternaryConfig);
+    }
   }
 
   public async ngOnInit(): Promise<void> {
@@ -132,6 +136,7 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
         this.config,
         this.secondaryConfig,
         this.tertiaryConfig,
+        this.quaternaryConfig,
       );
       this.hasError.set(!!this.engine.errorMessage());
       if (this.engine.errorMessage()) {

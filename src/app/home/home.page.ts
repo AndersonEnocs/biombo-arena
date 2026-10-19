@@ -44,6 +44,9 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
             <ion-segment-button value="triple">
               <ion-label>3 BIOMBOS (TRIFÁSICA)</ion-label>
             </ion-segment-button>
+            <ion-segment-button value="quadruple">
+              <ion-label>4 BIOMBOS (CUÁDRUPLE)</ion-label>
+            </ion-segment-button>
           </ion-segment>
         </div>
       </ion-toolbar>
@@ -55,7 +58,8 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
           <app-biombo-card
             [config]="biomboAlfa"
             [secondaryConfig]="mode() !== 'single' ? biomboBeta : null"
-            [tertiaryConfig]="mode() === 'triple' ? biomboGamma : null">
+            [tertiaryConfig]="mode() === 'triple' || mode() === 'quadruple' ? biomboGamma : null"
+            [quaternaryConfig]="mode() === 'quadruple' ? biomboDelta : null">
           </app-biombo-card>
         </div>
       </div>
@@ -107,7 +111,7 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
       50% { opacity: 0.4; transform: scale(0.85); }
     }
     .mode-segment {
-      max-width: 560px;
+      max-width: 720px;
       --background: rgba(255, 255, 255, 0.04);
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.06);
@@ -170,7 +174,7 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
   `],
 })
 export class HomePage {
-  public mode = signal<'single' | 'dual' | 'triple'>('single');
+  public mode = signal<'single' | 'dual' | 'triple' | 'quadruple'>('single');
 
   public biomboAlfa: BiomboConfig = {
     id: 'biombo-alfa',
@@ -194,5 +198,13 @@ export class HomePage {
     ballAmount: 30,
     resultCount: 3,
     ballType: 'color',
+  };
+
+  public biomboDelta: BiomboConfig = {
+    id: 'biombo-delta',
+    title: 'BIOMBO DELTA',
+    ballAmount: 30,
+    resultCount: 3,
+    ballType: 'yellow',
   };
 }

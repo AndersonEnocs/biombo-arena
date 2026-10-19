@@ -16,7 +16,8 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       <app-biombo-canvas
         [config]="config"
         [secondaryConfig]="secondaryConfig"
-        [tertiaryConfig]="tertiaryConfig">
+        [tertiaryConfig]="tertiaryConfig"
+        [quaternaryConfig]="quaternaryConfig">
       </app-biombo-canvas>
 
     <!-- Feedback de Carga / Error -->
@@ -34,8 +35,37 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
         </div>
       }
 
+      <button
+        type="button"
+        class="background-control background-control-previous"
+        [disabled]="!engine.isReady() || engine.isChangingBackground()"
+        [attr.aria-label]="'Fondo anterior. Actual: ' + engine.backgroundName()"
+        [title]="'Fondo anterior. Actual: ' + engine.backgroundName()"
+        (click)="engine.changeBackground(-1)">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="background-control background-control-next"
+        [disabled]="!engine.isReady() || engine.isChangingBackground()"
+        [attr.aria-label]="'Fondo siguiente. Actual: ' + engine.backgroundName()"
+        [title]="'Fondo siguiente. Actual: ' + engine.backgroundName()"
+        (click)="engine.changeBackground(1)">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+      </button>
+      @if (engine.backgroundError()) {
+        <p class="background-error" role="alert">{{ engine.backgroundError() }}</p>
+      }
+
       <!-- HUD Superior Flotante (Glassmorphism) -->
-      <div class="hud-top-bar" [class.dual-hud]="!!secondaryConfig" [class.triple-hud]="!!tertiaryConfig">
+      <div class="hud-top-bar"
+        [class.dual-hud]="!!secondaryConfig"
+        [class.triple-hud]="!!tertiaryConfig"
+        [class.quadruple-hud]="!!quaternaryConfig">
         <div class="biombo-meta">
           <div class="machine-meta">
             <span class="biombo-title">{{ config.title }}</span>
@@ -56,6 +86,14 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
               <span class="biombo-title">{{ tertiaryConfig.title }}</span>
               <span class="status-pill" [class]="engine.tertiaryState().toLowerCase()">
                 {{ engine.tertiaryState() }}
+              </span>
+            </div>
+          }
+          @if (quaternaryConfig) {
+            <div class="machine-meta">
+              <span class="biombo-title">{{ quaternaryConfig.title }}</span>
+              <span class="status-pill" [class]="engine.quaternaryState().toLowerCase()">
+                {{ engine.quaternaryState() }}
               </span>
             </div>
           }
@@ -107,6 +145,70 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       font-weight: 700;
       margin: 0;
     }
+    .background-control {
+      position: absolute;
+      top: 36px;
+      z-index: 30;
+      display: grid;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      padding: 0;
+      color: #f4f6fa;
+      background: rgba(10, 12, 18, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      cursor: pointer;
+      transform: translateY(-50%);
+      transition: color 160ms ease, background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+    }
+    .background-control-previous {
+      left: 22px;
+    }
+    .background-control-next {
+      right: 22px;
+    }
+    .background-control:hover:not(:disabled) {
+      color: #ffd200;
+      background: rgba(10, 12, 18, 0.92);
+      border-color: rgba(255, 210, 0, 0.65);
+    }
+    .background-control:focus-visible {
+      outline: 2px solid #ffd200;
+      outline-offset: 3px;
+    }
+    .background-control:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+    .background-control svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.8;
+    }
+    .background-error {
+      position: absolute;
+      top: 62px;
+      left: 50%;
+      z-index: 31;
+      max-width: calc(100% - 32px);
+      margin: 0;
+      padding: 7px 12px;
+      color: #fff;
+      background: rgba(120, 20, 20, 0.92);
+      border: 1px solid rgba(255, 100, 100, 0.5);
+      border-radius: 8px;
+      font-size: 0.72rem;
+      text-align: center;
+      transform: translateX(-50%);
+    }
     .hud-top-bar {
       position: absolute;
       top: 16px;
@@ -115,7 +217,7 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 16px;
+      padding: 10px 58px;
       background: rgba(10, 12, 18, 0.65);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
@@ -143,7 +245,7 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
     }
     .triple-hud {
       gap: 8px;
-      padding: 8px 12px;
+      padding: 8px 54px;
     }
     .triple-hud .biombo-meta {
       flex-wrap: wrap;
@@ -159,6 +261,25 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
     .triple-hud .status-pill {
       font-size: 0.58rem;
       padding: 3px 6px;
+    }
+    .quadruple-hud {
+      gap: 6px;
+      padding: 6px 48px;
+    }
+    .quadruple-hud .biombo-meta {
+      flex-wrap: wrap;
+      gap: 4px 8px;
+    }
+    .quadruple-hud .machine-meta {
+      gap: 4px;
+    }
+    .quadruple-hud .biombo-title {
+      font-size: 0.62rem;
+      letter-spacing: 0.3px;
+    }
+    .quadruple-hud .status-pill {
+      font-size: 0.52rem;
+      padding: 2px 5px;
     }
     .biombo-title {
       color: #fff;
@@ -220,11 +341,42 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       margin: 0;
       height: 46px;
     }
+    @media (max-width: 520px) {
+      .background-control {
+        top: 34px;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+      }
+      .background-control-previous {
+        left: 20px;
+      }
+      .background-control-next {
+        right: 20px;
+      }
+      .background-control svg {
+        width: 18px;
+        height: 18px;
+      }
+      .hud-top-bar {
+        padding-right: 48px;
+        padding-left: 48px;
+      }
+      .triple-hud {
+        padding-right: 46px;
+        padding-left: 46px;
+      }
+      .quadruple-hud {
+        padding-right: 40px;
+        padding-left: 40px;
+      }
+    }
   `],
 })
 export class BiomboCardComponent {
   @Input({ required: true }) config!: BiomboConfig;
   @Input() secondaryConfig: BiomboConfig | null = null;
   @Input() tertiaryConfig: BiomboConfig | null = null;
+  @Input() quaternaryConfig: BiomboConfig | null = null;
   public readonly engine: BiomboEngineService = inject(BiomboEngineService);
 }
