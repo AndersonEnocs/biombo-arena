@@ -48,5 +48,5 @@
     "vitest": "^4.1.11"
   },
   "description": "An Ionic project",
-  "packageManager": "pnpm@12.8.1"
+  "packageManager": "pnpm@12.15.0"
 }
