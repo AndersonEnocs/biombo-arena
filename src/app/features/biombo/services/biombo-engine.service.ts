@@ -272,6 +272,8 @@ export class BiomboEngineService {
           ['base', 'Base'],
           ['backwall', 'Back Wall'],
           ['backpanel', 'Back Panel'],
+          ['ballholder', 'Ball Holder'],
+          ['ballholderglass', 'Ball Holder Glass'],
         ]).get(normalizedName);
         if (tablePartName && !this.lotteryTableTemplates.has(tablePartName)) {
           this.lotteryTableTemplates.set(tablePartName, object);
@@ -621,7 +623,7 @@ export class BiomboEngineService {
     table.rotation.y = Math.PI / 2;
     table.scale.setScalar(scale);
 
-    for (const name of ['Base', 'Back Wall', 'Back Panel']) {
+    for (const name of ['Base', 'Back Wall', 'Back Panel', 'Ball Holder', 'Ball Holder Glass']) {
       const template = this.lotteryTableTemplates.get(name);
       if (!template) {
         continue;
