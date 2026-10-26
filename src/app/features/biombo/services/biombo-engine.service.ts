@@ -1,5 +1,6 @@
 import { inject, Injectable, NgZone, signal } from '@angular/core';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RapierLoaderService } from '../../../core/services/rapier-loader.service';
 import { SolidEntity } from '../models/solid.entity';
 import { BiomboConfig, BiomboState, generateBiomboResults } from '../utilities/biombo.interfaces';
@@ -86,6 +87,7 @@ export class BiomboEngineService {
   private mechanismBias = 0;
   private agitationBalls: THREE.Mesh[] = [];
   private agitationBallStates: AgitationBallState[] = [];
+  private readonly lotteryTableTemplates = new Map<string, THREE.Object3D>();
   private lastAgitationFrame = 0;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
@@ -155,9 +157,7 @@ export class BiomboEngineService {
 
       const probeCanvas = document.createElement('canvas');
       if (!probeCanvas.getContext('webgl2')) {
-        throw new Error(
-          'WebGL 2 no está disponible en este navegador. Activa la aceleración por hardware o prueba en un navegador con WebGL 2 habilitado.',
-        );
+        throw new Error('WebGL 2 no disponible.');
       }
 
       this.renderer = new THREE.WebGLRenderer({
@@ -195,13 +195,13 @@ export class BiomboEngineService {
       const glassMaterial = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         metalness: 0.0,
-        roughness: 0.0, // 0 absoluto = cero desenfoque
+        roughness: 0.0,
         transparent: true,
-        opacity: 0.22,  // Elimina la niebla blanquecina
+        opacity: 0.22,
         reflectivity: 1.0,
         clearcoat: 1.0,
         clearcoatRoughness: 0.0,
-        side: THREE.FrontSide, // Solo cara frontal = elimina la imagen doble
+        side: THREE.FrontSide,
         depthWrite: false,
       });
 
@@ -230,10 +230,11 @@ export class BiomboEngineService {
         roughness: 0.35,
       });
 
-      const [hollow, ornaments, ramp] = await Promise.all([
+      const [hollow, ornaments, ramp, lotteryModel] = await Promise.all([
         new SolidEntity(rapier, glassMaterial).load('/assets/hollow_sphere.fbx'),
         new SolidEntity(rapier).load('/assets/ornaments.fbx'),
         new SolidEntity(rapier, rampMaterial).load('/assets/ramp.fbx'),
+        new GLTFLoader().loadAsync('/assets/loteria.glb'),
       ]);
 
       this.solids['hollow'] = hollow;
@@ -253,10 +254,31 @@ export class BiomboEngineService {
         (ornaments['glass_hole'] as THREE.Mesh).material = glassMaterial;
         (ornaments['glass_hole'] as THREE.Mesh).visible = false;
       }
+
+      if (ornaments['table']) {
+        ornaments['table'].visible = false;
+      }
+
       ornaments.meshes.forEach((mesh) => this.machineRoot.add(mesh));
       ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
 
-      this.setLotteryTableColor(this.machineRoot, 0xf4f4f0);
+      this.lotteryTableTemplates.clear();
+      lotteryModel.scene.traverse((object) => {
+        const normalizedName = object.name
+          .replace(/[^a-z]/gi, '')
+          .toLowerCase()
+          .replace(/\d+$/, '');
+        const tablePartName = new Map([
+          ['base', 'Base'],
+          ['backwall', 'Back Wall'],
+          ['backpanel', 'Back Panel'],
+        ]).get(normalizedName);
+        if (tablePartName && !this.lotteryTableTemplates.has(tablePartName)) {
+          this.lotteryTableTemplates.set(tablePartName, object);
+        }
+      });
+
+      this.machineRoot.add(this.createLotteryTable(0xf4f4f0));
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
@@ -272,7 +294,6 @@ export class BiomboEngineService {
       this.updateSceneLayout(width, height);
 
       this.ngZone.runOutsideAngular(() => this.animate());
-
       this.isReady.set(true);
     } catch (err: any) {
       const message = err?.message || 'Error al cargar modelos';
@@ -308,9 +329,9 @@ export class BiomboEngineService {
       this.backgroundName.set(nextBackground.label);
       previousTexture?.dispose();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error desconocido al cargar el fondo.';
-      this.backgroundError.set(`No se pudo cambiar el fondo: ${message}`);
-      console.error('Error cambiando el fondo del biombo:', error);
+      const message = error instanceof Error ? error.message : 'Error al cambiar fondo.';
+      this.backgroundError.set(message);
+      console.error(error);
     } finally {
       this.isChangingBackground.set(false);
     }
@@ -384,13 +405,13 @@ export class BiomboEngineService {
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
-      throw new Error('No se pudo preparar el segundo biombo.');
+      throw new Error('Error al preparar biombo secundario.');
     }
 
     const agitationBalls = this.agitationBalls.map((_, index) => {
       const ball = root.getObjectByName(`agitation-ball-${index}`);
       if (!(ball instanceof THREE.Mesh)) {
-        throw new Error('No se pudo preparar el conjunto de bolas del segundo biombo.');
+        throw new Error('Error en conjunto de bolas.');
       }
       ball.visible = true;
       return ball;
@@ -471,13 +492,13 @@ export class BiomboEngineService {
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
-      throw new Error('No se pudo preparar el tercer biombo.');
+      throw new Error('Error al preparar biombo terciario.');
     }
 
     const agitationBalls = this.agitationBalls.map((_, index) => {
       const ball = root.getObjectByName(`agitation-ball-${index}`);
       if (!(ball instanceof THREE.Mesh)) {
-        throw new Error('No se pudo preparar el conjunto de bolas del tercer biombo.');
+        throw new Error('Error en conjunto de bolas.');
       }
       ball.visible = true;
       return ball;
@@ -558,13 +579,13 @@ export class BiomboEngineService {
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
-      throw new Error('No se pudo preparar el cuarto biombo.');
+      throw new Error('Error al preparar biombo cuaternario.');
     }
 
     const agitationBalls = this.agitationBalls.map((_, index) => {
       const ball = root.getObjectByName(`agitation-ball-${index}`);
       if (!(ball instanceof THREE.Mesh)) {
-        throw new Error('No se pudo preparar el conjunto de bolas del cuarto biombo.');
+        throw new Error('Error en conjunto de bolas.');
       }
       ball.visible = true;
       return ball;
@@ -593,28 +614,82 @@ export class BiomboEngineService {
     this.quaternaryExtractedBalls.set([]);
   }
 
-  private setLotteryTableColor(root: THREE.Object3D, color: number): void {
-    const table = root.getObjectByName('table');
-    if (!(table instanceof THREE.Mesh)) {
-      throw new Error('No se encontró la mesa de madera en ornaments.fbx.');
+  private createLotteryTable(color: number): THREE.Group {
+    const table = new THREE.Group();
+    table.name = 'biombo-table-asset';
+    const scale = 0.92 / 0.079;
+    table.rotation.y = Math.PI / 2;
+    table.scale.setScalar(scale);
+
+    for (const name of ['Base', 'Back Wall', 'Back Panel']) {
+      const template = this.lotteryTableTemplates.get(name);
+      if (!template) {
+        continue;
+      }
+      const part = template.clone(true);
+      part.name = name;
+      part.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) {
+          return;
+        }
+        object.material = Array.isArray(object.material)
+          ? object.material.map((mat) => mat.clone())
+          : object.material.clone();
+        object.castShadow = true;
+        object.receiveShadow = true;
+      });
+      table.add(part);
     }
 
-    const tintMaterial = (material: THREE.Material): THREE.Material => {
-      const coloredMaterial = material.clone();
-      if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
-        coloredMaterial.color.setHex(color);
-      }
-      return coloredMaterial;
-    };
-    table.material = Array.isArray(table.material)
-      ? table.material.map(tintMaterial)
-      : tintMaterial(table.material);
+
+    const offsetX = 0.0;
+    const offsetY = 0.0;
+    const offsetZ = -10.8;
+
+    table.updateMatrixWorld(true);
+    const circleRef = table.getObjectByName('Circle005')
+      || table.getObjectByName('Circle005_1')
+      || table.getObjectByName('Back Panel');
+
+    if (circleRef) {
+      const bounds = new THREE.Box3().setFromObject(circleRef);
+      const center = bounds.getCenter(new THREE.Vector3());
+      table.position.x = -center.x + offsetX;
+      table.position.y = -center.y + offsetY;
+      table.position.z = offsetZ - center.z;
+    } else {
+      table.position.set(offsetX, -15.8 + offsetY, offsetZ);
+    }
+
+    this.setLotteryTableColor(table, color);
+    return table;
+  }
+
+  private setLotteryTableColor(root: THREE.Object3D, color: number): void {
+    const table = root.getObjectByName('biombo-table-asset');
+    if (!table) {
+      return;
+    }
+
     table.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
+      if (object.name !== 'Base' && object.name !== 'Back Wall') {
         return;
       }
-      object.castShadow = true;
-      object.receiveShadow = true;
+      object.traverse((part) => {
+        if (!(part instanceof THREE.Mesh)) {
+          return;
+        }
+        const applyColor = (material: THREE.Material): THREE.Material => {
+          const coloredMaterial = material.clone();
+          if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
+            coloredMaterial.color.setHex(color);
+          }
+          return coloredMaterial;
+        };
+        part.material = Array.isArray(part.material)
+          ? part.material.map(applyColor)
+          : applyColor(part.material);
+      });
     });
   }
 
@@ -652,17 +727,26 @@ export class BiomboEngineService {
       this.camera.position.set(0, 0, portrait ? 70 : 64);
     } else if (this.secondaryRig) {
       const portrait = width < height;
-      const scale = portrait ? 0.42 : 0.62;
-      const separation = portrait ? 12 : 13;
+      const scale = portrait ? 0.42 : 0.58;
+
+      // Calibración de posición independiente en modo dual
+      const biombo1_X = portrait ? 0 : -13.5;
+      const biombo1_Y = portrait ? 12.0 : 0.0;
+
+      const biombo2_X = portrait ? 0 : 13.5;
+      const biombo2_Y = portrait ? -12.0 : 0.0;
+
       this.machineRoot.scale.setScalar(scale);
-      this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
+      this.machineRoot.position.set(biombo1_X, biombo1_Y, 0);
+
       this.secondaryRig.root.scale.setScalar(scale);
-      this.secondaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
-      this.camera.position.set(0, 0, portrait ? 67 : 59);
+      this.secondaryRig.root.position.set(biombo2_X, biombo2_Y, 0);
+
+      this.camera.position.set(0, 0, portrait ? 67 : 61);
     } else {
       this.machineRoot.scale.setScalar(1);
       this.machineRoot.position.set(0, 0, 0);
-      this.camera.position.set(0, 0, 48);
+      this.camera.position.set(0, 0, 110.88);
     }
 
     this.camera.lookAt(0, 0, 0);
