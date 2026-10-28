@@ -19,12 +19,6 @@ type BallExitAnimation = {
   targetRotZ?: number;
 };
 
-type CameraFollowState = {
-  mesh: THREE.Mesh;
-  startedAt: number;
-  durationMs: number;
-};
-
 type AgitationBallState = {
   mesh: THREE.Mesh;
   velocity: THREE.Vector3;
@@ -45,25 +39,45 @@ type SecondaryBiomboRig = {
   mechanismBias: number;
 };
 
+type TertiaryBiomboRig = SecondaryBiomboRig;
+type QuaternaryBiomboRig = SecondaryBiomboRig;
+
 @Injectable()
 export class BiomboEngineService {
   public readonly isReady = signal(false);
   public readonly errorMessage = signal<string | null>(null);
+  public readonly backgroundError = signal<string | null>(null);
+  public readonly backgroundName = signal('Pasillo clásico');
+  public readonly isChangingBackground = signal(false);
   public readonly extractedBalls = signal<number[]>([]);
   public readonly state = signal<BiomboState>('IDLE');
   public readonly secondaryExtractedBalls = signal<number[]>([]);
   public readonly secondaryState = signal<BiomboState>('IDLE');
+  public readonly tertiaryExtractedBalls = signal<number[]>([]);
+  public readonly tertiaryState = signal<BiomboState>('IDLE');
+  public readonly quaternaryExtractedBalls = signal<number[]>([]);
+  public readonly quaternaryState = signal<BiomboState>('IDLE');
 
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
+  private backgroundTexture?: THREE.CubeTexture;
+  private readonly backgrounds = [
+    { folder: 'hallway', label: 'Pasillo clásico' },
+    { folder: 'office', label: 'Oficina moderna' },
+  ] as const;
+  private currentBackgroundIndex = 0;
   private animFrameId: number | null = null;
   private solids: { [key: string]: SolidEntity } = {};
   private config: BiomboConfig | null = null;
   private machineRoot!: THREE.Group;
   private secondaryRig?: SecondaryBiomboRig;
+  private tertiaryRig?: TertiaryBiomboRig;
+  private quaternaryRig?: QuaternaryBiomboRig;
   private drawTimers: number[] = [];
   private secondaryDrawTimers: number[] = [];
+  private tertiaryDrawTimers: number[] = [];
+  private quaternaryDrawTimers: number[] = [];
   private ballEffects: BallExitAnimation[] = [];
   private drumGroup?: THREE.Group;
   private mainRotationShaftGroup?: THREE.Group;
@@ -75,24 +89,18 @@ export class BiomboEngineService {
   private agitationBallStates: AgitationBallState[] = [];
   private readonly lotteryTableTemplates = new Map<string, THREE.Object3D>();
   private lastAgitationFrame = 0;
-  private cameraFollow?: CameraFollowState;
-  private cameraReturningHome = false;
-  private cameraHomePosition = new THREE.Vector3(0, 0, 48);
-  private readonly cameraHomeTarget = new THREE.Vector3(0, 0, 0);
-  private readonly cameraFollowDurationMs = 4000;
-  private readonly cameraFollowDistance = 13;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
 
   private readonly agitationPalette = [
-    0x00d2ff, // Azul cian
-    0xffd200, // Amarillo brillante
-    0xff3b6f, // Rosa magenta (como bola 10 del video)
-    0x00e676, // Verde lima
-    0xffffff, // Blanco perla
-    0x9c27b0, // Púrpura
-    0xff9100, // Naranja
-    0x3d5afe, // Azul cobalto
+    0x00d2ff,
+    0xffd200,
+    0xff3b6f,
+    0x00e676,
+    0xffffff,
+    0x9c27b0,
+    0xff9100,
+    0x3d5afe,
   ];
 
   private readonly rapierLoader = inject(RapierLoaderService);
@@ -102,20 +110,29 @@ export class BiomboEngineService {
     container: HTMLElement,
     config: BiomboConfig,
     secondaryConfig: BiomboConfig | null = null,
-    // Las máquinas terciaria y cuaternaria no están implementadas en esta versión
-    // tertiaryConfig: BiomboConfig | null = null,
-    // quaternaryConfig: BiomboConfig | null = null,
+    tertiaryConfig: BiomboConfig | null = null,
+    quaternaryConfig: BiomboConfig | null = null,
   ): Promise<void> {
     this.config = config;
     this.secondaryRig = undefined;
+    this.tertiaryRig = undefined;
+    this.quaternaryRig = undefined;
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
+    this.clearQuaternaryTimers();
     this.extractedBalls.set([]);
     this.state.set('IDLE');
     this.secondaryExtractedBalls.set([]);
     this.secondaryState.set('IDLE');
+    this.tertiaryExtractedBalls.set([]);
+    this.tertiaryState.set('IDLE');
+    this.quaternaryExtractedBalls.set([]);
+    this.quaternaryState.set('IDLE');
     this.errorMessage.set(null);
-    this.cameraFollow = undefined;
-    this.cameraReturningHome = false;
+    this.backgroundError.set(null);
+    this.backgroundName.set(this.backgrounds[0].label);
+    this.currentBackgroundIndex = 0;
+    this.isChangingBackground.set(false);
     this.mainRotationAngle = 0;
     this.clearBallEffects();
 
@@ -126,23 +143,12 @@ export class BiomboEngineService {
       const height = container.clientHeight || window.innerHeight;
 
       this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0x0a0c10);
+      this.backgroundTexture = await this.loadBackgroundTexture(this.backgrounds[0].folder);
+      this.scene.background = this.backgroundTexture;
+      this.scene.environment = this.backgroundTexture;
       this.machineRoot = new THREE.Group();
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
-
-      const skyboxTexture = await new Promise<THREE.CubeTexture>((resolve, reject) => {
-        new THREE.CubeTextureLoader()
-          .setPath('/assets/skybox/hallway/')
-          .load(
-            ['posx.png', 'negx.png', 'posy.png', 'negy.png', 'posz.png', 'negz.png'],
-            (texture) => resolve(texture),
-            undefined,
-            (error) => reject(error)
-          );
-      });
-      this.scene.background = skyboxTexture;
-      this.scene.environment = skyboxTexture;
 
       const aspect = width / height;
       this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 1000);
@@ -150,13 +156,8 @@ export class BiomboEngineService {
       this.camera.lookAt(0, 0, 0);
 
       const probeCanvas = document.createElement('canvas');
-      const probeContext =
-        probeCanvas.getContext('webgl2') ??
-        probeCanvas.getContext('webgl') ??
-        probeCanvas.getContext('experimental-webgl');
-
-      if (!probeContext) {
-        throw new Error('Tu navegador o el entorno actual no soportan WebGL.');
+      if (!probeCanvas.getContext('webgl2')) {
+        throw new Error('WebGL 2 no disponible.');
       }
 
       this.renderer = new THREE.WebGLRenderer({
@@ -194,18 +195,14 @@ export class BiomboEngineService {
       const glassMaterial = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         metalness: 0.0,
-        roughness: 0.0, // 0 absoluto = cero desenfoque
+        roughness: 0.0,
         transparent: true,
-        opacity: 0.22,  // Elimina la niebla blanquecina
+        opacity: 0.22,
         reflectivity: 1.0,
         clearcoat: 1.0,
         clearcoatRoughness: 0.0,
-        side: THREE.FrontSide, // Solo cara frontal = elimina la imagen doble
+        side: THREE.FrontSide,
         depthWrite: false,
-        side: THREE.DoubleSide,
-        reflectivity: 0.9,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.05,
       });
 
       const darkChassisMaterial = new THREE.MeshStandardMaterial({
@@ -235,7 +232,7 @@ export class BiomboEngineService {
 
       const [hollow, ornaments, ramp, lotteryModel] = await Promise.all([
         new SolidEntity(rapier, glassMaterial).load('/assets/hollow_sphere.fbx'),
-        new SolidEntity(rapier, darkChassisMaterial).load('/assets/ornaments.fbx'),
+        new SolidEntity(rapier).load('/assets/ornaments.fbx'),
         new SolidEntity(rapier, rampMaterial).load('/assets/ramp.fbx'),
         new GLTFLoader().loadAsync('/assets/loteria.glb'),
       ]);
@@ -250,7 +247,6 @@ export class BiomboEngineService {
       if (ornaments['tube']) (ornaments['tube'] as THREE.Mesh).material = darkChassisMaterial;
       if (ornaments['base']) (ornaments['base'] as THREE.Mesh).material = darkChassisMaterial;
       if (ornaments['support']) (ornaments['support'] as THREE.Mesh).material = darkChassisMaterial;
-      if (ornaments['table']) (ornaments['table'] as THREE.Mesh).material = darkChassisMaterial;
       if (ornaments['ring_outer']) (ornaments['ring_outer'] as THREE.Mesh).material = chromeMaterial;
       if (ornaments['ring_inner']) (ornaments['ring_inner'] as THREE.Mesh).material = neonRingMaterial;
 
@@ -266,12 +262,36 @@ export class BiomboEngineService {
       ornaments.meshes.forEach((mesh) => this.machineRoot.add(mesh));
       ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
 
-      this.setLotteryTableColor(this.machineRoot, 0xf4f4f0);
+      this.lotteryTableTemplates.clear();
+      lotteryModel.scene.traverse((object) => {
+        const normalizedName = object.name
+          .replace(/[^a-z]/gi, '')
+          .toLowerCase()
+          .replace(/\d+$/, '');
+        const tablePartName = new Map([
+          ['base', 'Base'],
+          ['backwall', 'Back Wall'],
+          ['backpanel', 'Back Panel'],
+          ['ballholder', 'Ball Holder'],
+          ['ballholderglass', 'Ball Holder Glass'],
+        ]).get(normalizedName);
+        if (tablePartName && !this.lotteryTableTemplates.has(tablePartName)) {
+          this.lotteryTableTemplates.set(tablePartName, object);
+        }
+      });
+
+      this.machineRoot.add(this.createLotteryTable(0xf4f4f0));
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
       if (secondaryConfig) {
         this.createSecondaryRig(secondaryConfig);
+      }
+      if (tertiaryConfig) {
+        this.createTertiaryRig(tertiaryConfig);
+      }
+      if (quaternaryConfig) {
+        this.createQuaternaryRig(quaternaryConfig);
       }
       this.updateSceneLayout(width, height);
 
@@ -311,9 +331,9 @@ export class BiomboEngineService {
       this.backgroundName.set(nextBackground.label);
       previousTexture?.dispose();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error desconocido al cargar el fondo.';
-      this.backgroundError.set(`No se pudo cambiar el fondo: ${message}`);
-      console.error('Error cambiando el fondo del biombo:', error);
+      const message = error instanceof Error ? error.message : 'Error al cambiar fondo.';
+      this.backgroundError.set(message);
+      console.error(error);
     } finally {
       this.isChangingBackground.set(false);
     }
@@ -372,6 +392,7 @@ export class BiomboEngineService {
   private createSecondaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-beta';
+    this.setLotteryTableColor(root, 0x17191f);
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
       if (object.userData['isDrawnBall']) {
@@ -397,6 +418,7 @@ export class BiomboEngineService {
       ball.visible = true;
       return ball;
     });
+    this.applyAgitationBallAppearance(agitationBalls, config);
 
     this.secondaryRig = {
       config,
@@ -472,13 +494,13 @@ export class BiomboEngineService {
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
-      throw new Error('No se pudo preparar el tercer biombo.');
+      throw new Error('Error al preparar biombo terciario.');
     }
 
     const agitationBalls = this.agitationBalls.map((_, index) => {
       const ball = root.getObjectByName(`agitation-ball-${index}`);
       if (!(ball instanceof THREE.Mesh)) {
-        throw new Error('No se pudo preparar el conjunto de bolas del tercer biombo.');
+        throw new Error('Error en conjunto de bolas.');
       }
       ball.visible = true;
       return ball;
@@ -559,13 +581,13 @@ export class BiomboEngineService {
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
-      throw new Error('No se pudo preparar el cuarto biombo.');
+      throw new Error('Error al preparar biombo cuaternario.');
     }
 
     const agitationBalls = this.agitationBalls.map((_, index) => {
       const ball = root.getObjectByName(`agitation-ball-${index}`);
       if (!(ball instanceof THREE.Mesh)) {
-        throw new Error('No se pudo preparar el conjunto de bolas del cuarto biombo.');
+        throw new Error('Error en conjunto de bolas.');
       }
       ball.visible = true;
       return ball;
@@ -594,28 +616,82 @@ export class BiomboEngineService {
     this.quaternaryExtractedBalls.set([]);
   }
 
-  private setLotteryTableColor(root: THREE.Object3D, color: number): void {
-    const table = root.getObjectByName('table');
-    if (!(table instanceof THREE.Mesh)) {
-      throw new Error('No se encontró la mesa de madera en ornaments.fbx.');
+  private createLotteryTable(color: number): THREE.Group {
+    const table = new THREE.Group();
+    table.name = 'biombo-table-asset';
+    const scale = 0.92 / 0.079;
+    table.rotation.y = Math.PI / 2;
+    table.scale.setScalar(scale);
+
+    for (const name of ['Base', 'Back Wall', 'Back Panel', 'Ball Holder', 'Ball Holder Glass']) {
+      const template = this.lotteryTableTemplates.get(name);
+      if (!template) {
+        continue;
+      }
+      const part = template.clone(true);
+      part.name = name;
+      part.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) {
+          return;
+        }
+        object.material = Array.isArray(object.material)
+          ? object.material.map((mat) => mat.clone())
+          : object.material.clone();
+        object.castShadow = true;
+        object.receiveShadow = true;
+      });
+      table.add(part);
     }
 
-    const tintMaterial = (material: THREE.Material): THREE.Material => {
-      const coloredMaterial = material.clone();
-      if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
-        coloredMaterial.color.setHex(color);
-      }
-      return coloredMaterial;
-    };
-    table.material = Array.isArray(table.material)
-      ? table.material.map(tintMaterial)
-      : tintMaterial(table.material);
+
+    const offsetX = 0.0;
+    const offsetY = 0.0;
+    const offsetZ = -10.8;
+
+    table.updateMatrixWorld(true);
+    const circleRef = table.getObjectByName('Circle005')
+      || table.getObjectByName('Circle005_1')
+      || table.getObjectByName('Back Panel');
+
+    if (circleRef) {
+      const bounds = new THREE.Box3().setFromObject(circleRef);
+      const center = bounds.getCenter(new THREE.Vector3());
+      table.position.x = -center.x + offsetX;
+      table.position.y = -center.y + offsetY;
+      table.position.z = offsetZ - center.z;
+    } else {
+      table.position.set(offsetX, -15.8 + offsetY, offsetZ);
+    }
+
+    this.setLotteryTableColor(table, color);
+    return table;
+  }
+
+  private setLotteryTableColor(root: THREE.Object3D, color: number): void {
+    const table = root.getObjectByName('biombo-table-asset');
+    if (!table) {
+      return;
+    }
+
     table.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
+      if (object.name !== 'Base' && object.name !== 'Back Wall') {
         return;
       }
-      object.castShadow = true;
-      object.receiveShadow = true;
+      object.traverse((part) => {
+        if (!(part instanceof THREE.Mesh)) {
+          return;
+        }
+        const applyColor = (material: THREE.Material): THREE.Material => {
+          const coloredMaterial = material.clone();
+          if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
+            coloredMaterial.color.setHex(color);
+          }
+          return coloredMaterial;
+        };
+        part.material = Array.isArray(part.material)
+          ? part.material.map(applyColor)
+          : applyColor(part.material);
+      });
     });
   }
 
@@ -624,24 +700,58 @@ export class BiomboEngineService {
       return;
     }
 
-    if (this.secondaryRig) {
+    if (this.quaternaryRig) {
       const portrait = width < height;
-      const scale = portrait ? 0.42 : 0.62;
-      const separation = portrait ? 12 : 13;
+      const scale = portrait ? 0.26 : 0.3;
+      const horizontalSeparation = portrait ? 8 : 10;
+      const frontHorizontalSeparation = portrait ? 10 : 14;
+      const verticalSeparation = portrait ? 10 : 7;
+      const depthSeparation = portrait ? 9 : 12;
+      this.machineRoot.scale.setScalar(scale);
+      this.machineRoot.position.set(-horizontalSeparation, verticalSeparation, -depthSeparation);
+      this.secondaryRig?.root.scale.setScalar(scale);
+      this.secondaryRig?.root.position.set(horizontalSeparation, verticalSeparation, -depthSeparation);
+      this.tertiaryRig?.root.scale.setScalar(scale);
+      this.tertiaryRig?.root.position.set(-frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+      this.quaternaryRig.root.scale.setScalar(scale);
+      this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+      this.camera.position.set(0, 0, portrait ? 76 : 68);
+    } else if (this.tertiaryRig) {
+      const portrait = width < height;
+      const scale = portrait ? 0.34 : 0.42;
+      const separation = portrait ? 15.5 : 17.5;
+      this.machineRoot.scale.setScalar(scale);
+      this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
+      this.secondaryRig?.root.scale.setScalar(scale);
+      this.secondaryRig?.root.position.set(0, 0, 0);
+      this.tertiaryRig.root.scale.setScalar(scale);
+      this.tertiaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
+      this.camera.position.set(0, 0, portrait ? 70 : 64);
+    } else if (this.secondaryRig) {
+      const portrait = width < height;
+      const scale = portrait ? 0.42 : 0.58;
+
+      // Calibración de posición independiente en modo dual
+      const biombo1_X = portrait ? 0 : -13.5;
+      const biombo1_Y = portrait ? 12.0 : 0.0;
+
+      const biombo2_X = portrait ? 0 : 13.5;
+      const biombo2_Y = portrait ? -12.0 : 0.0;
+
       this.machineRoot.scale.setScalar(scale);
       this.machineRoot.position.set(biombo1_X, biombo1_Y, 0);
 
       this.secondaryRig.root.scale.setScalar(scale);
-      this.secondaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
-      this.camera.position.set(0, 0, portrait ? 67 : 59);
+      this.secondaryRig.root.position.set(biombo2_X, biombo2_Y, 0);
+
+      this.camera.position.set(0, 0, portrait ? 67 : 61);
     } else {
       this.machineRoot.scale.setScalar(1);
       this.machineRoot.position.set(0, 0, 0);
       this.camera.position.set(0, 0, 110.88);
     }
 
-    this.cameraHomePosition.copy(this.camera.position);
-    this.camera.lookAt(this.cameraHomeTarget);
+    this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
   }
 
@@ -652,7 +762,6 @@ export class BiomboEngineService {
     const ballRadius = this.agitationBallStates[0]?.radius || 0.95;
     const minDist = ballRadius * 2.05;
 
-    // Altura calculada en la base interior del cristal
     let bowlCenterY = -8.5;
     if (this.solids['hollow']?.mesh) {
       const box = new THREE.Box3().setFromObject(this.solids['hollow'].mesh);
@@ -907,7 +1016,7 @@ export class BiomboEngineService {
   }
 
   private buildAgitationBalls(): void {
-    if (!this.ballGroup) {
+    if (!this.ballGroup || !this.config) {
       return;
     }
 
@@ -925,17 +1034,9 @@ export class BiomboEngineService {
     const total = 24;
     for (let index = 0; index < total; index++) {
       const ballRadius = 0.92;
-      const ballGeometry = new THREE.SphereGeometry(ballRadius, 24, 24);
-
-      // Textura esmaltada vibrante con acabado pulido de casino
-      const ballMaterial = new THREE.MeshStandardMaterial({
-        color: this.agitationPalette[index % this.agitationPalette.length],
-        roughness: 0.18,
-        metalness: 0.08,
-      });
-
-      const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+      const ball = this.createNumberedBallMesh(index + 1, this.config, ballRadius);
       ball.name = `agitation-ball-${index}`;
+      ball.userData['ballNumber'] = index + 1;
       ball.castShadow = true;
       ball.receiveShadow = true;
       ball.renderOrder = 3;
@@ -952,6 +1053,26 @@ export class BiomboEngineService {
     }
   }
 
+  private applyAgitationBallAppearance(balls: THREE.Mesh[], config: BiomboConfig): void {
+    balls.forEach((ball, index) => {
+      const value = Number(ball.userData['ballNumber']) || index + 1;
+      ball.material = this.createNumberedBallMaterial(value, config);
+    });
+  }
+
+  private createNumberedBallMesh(value: number, config: BiomboConfig, radius: number): THREE.Mesh {
+    const geometry = new THREE.SphereGeometry(radius, 32, 32);
+    return new THREE.Mesh(geometry, this.createNumberedBallMaterial(value, config));
+  }
+
+  private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshStandardMaterial {
+    return new THREE.MeshStandardMaterial({
+      map: this.createBallNumberTexture(value, config),
+      roughness: 0.15,
+      metalness: 0.1,
+    });
+  }
+
   private animate(): void {
     this.animFrameId = requestAnimationFrame(() => this.animate());
     const now = performance.now();
@@ -961,9 +1082,7 @@ export class BiomboEngineService {
     this.lastAgitationFrame = now;
     const isAgitating = this.state() === 'SHUFFLING';
 
-    // Giro del biombo durante la mezcla
-    // const shaftSpeed = isAgitating ? 0.048 : 0;
-    const shaftSpeed = isAgitating ? 0.075 : 0;
+    const shaftSpeed = isAgitating ? 0.068 : 0;
     this.mainRotationAngle += shaftSpeed;
 
     if (this.mainRotationShaftGroup) {
@@ -982,10 +1101,6 @@ export class BiomboEngineService {
       this.mechanismGroup.rotation.z = (Math.cos(this.mechanismBias * 2.9) * 0.35) * agitationBoost;
     }
 
-    // Dinámica física de las bolas interiores
-    // =========================================================================
-    // ⚙️ DINÁMICA FÍSICA BALÍSTICA DE IMPACTO REAL
-    // =========================================================================
     if (this.agitationBallStates.length > 0 && this.state() !== 'IDLE') {
       const sphereRadius = 9.8;
       const drumQuaternion = new THREE.Quaternion();
@@ -995,48 +1110,52 @@ export class BiomboEngineService {
 
       const worldGravityDir = new THREE.Vector3(0, -1, 0);
       const localGravityDir = worldGravityDir.clone().applyQuaternion(drumQuaternion.clone().invert());
+      const drumAngularVelocityX = shaftSpeed / deltaSeconds;
 
       this.agitationBallStates.forEach((ballState) => {
         const ball = ballState.mesh;
         const velocity = ballState.velocity;
 
         if (isAgitating) {
-          const localYPosition = ball.position.dot(localGravityDir.clone().negate());
+          const currentDistance = ball.position.length();
+          const wallProximity = currentDistance / (sphereRadius - ballState.radius);
 
-          // 1. Impulso balístico que barre desde el pie del biombo
-          if (localYPosition < -5.8) {
-            const kickUp = Math.random() * 55.0 + 40.0;
-            velocity.addScaledVector(localGravityDir.clone().negate(), kickUp * deltaSeconds * 2.8);
-
-            const kickX = (Math.random() - 0.5) * 45.0;
-            const kickZ = (Math.random() - 0.5) * 45.0;
-            velocity.x += kickX * deltaSeconds * 2.2;
-            velocity.z += kickZ * deltaSeconds * 2.2;
+          if (wallProximity > 0.82) {
+            const tangentialVy = -drumAngularVelocityX * ball.position.z * 0.45;
+            const tangentialVz = drumAngularVelocityX * ball.position.y * 0.45;
+            velocity.y += (tangentialVy - velocity.y) * 4.5 * deltaSeconds;
+            velocity.z += (tangentialVz - velocity.z) * 4.5 * deltaSeconds;
           }
 
-          velocity.addScaledVector(localGravityDir, 68.0 * deltaSeconds);
+          const localY = ball.position.dot(localGravityDir.clone().negate());
+          if (localY < -4.8) {
+            const loft = Math.random() * 42.0 + 34.0;
+            velocity.addScaledVector(localGravityDir.clone().negate(), loft * deltaSeconds * 2.2);
 
-          // Fricción ligera de aire en pleno giro
-          velocity.x *= Math.pow(0.992, deltaSeconds * 60);
-          velocity.z *= Math.pow(0.992, deltaSeconds * 60);
-          velocity.y *= Math.pow(0.995, deltaSeconds * 60);
+            velocity.x += (Math.random() - 0.5) * 36.0 * deltaSeconds;
+            velocity.z += (Math.random() - 0.5) * 36.0 * deltaSeconds;
+          }
+
+          velocity.addScaledVector(localGravityDir, 58.0 * deltaSeconds);
+
+          velocity.x *= Math.pow(0.994, deltaSeconds * 60);
+          velocity.z *= Math.pow(0.994, deltaSeconds * 60);
+          velocity.y *= Math.pow(0.996, deltaSeconds * 60);
+
+          const maxSpeed = 54.0;
+          if (velocity.lengthSq() > maxSpeed * maxSpeed) {
+            velocity.setLength(maxSpeed);
+          }
         } else {
-          // ⭐ 2. FASE DE ASENTAMIENTO (FIN DEL GIRO / PICKING):
-          const localYPosition = ball.position.dot(localGravityDir.clone().negate());
+          const localY = ball.position.dot(localGravityDir.clone().negate());
+          velocity.addScaledVector(localGravityDir, 105.0 * deltaSeconds);
 
-          // Gravedad fuerte (110): caen de golpe hacia el piso de vidrio sin frenarse en el aire
-          velocity.addScaledVector(localGravityDir, 110.0 * deltaSeconds);
-
-          // Fricción suave mientras caen por el aire
           velocity.x *= Math.pow(0.96, deltaSeconds * 60);
           velocity.z *= Math.pow(0.96, deltaSeconds * 60);
           velocity.y *= Math.pow(0.97, deltaSeconds * 60);
 
-          // ⭐ Freno y reposo absoluto ÚNICAMENTE cuando ya llegaron al fondo (Y < -6.0)
-          if (localYPosition < -6.0) {
+          if (localY < -6.0) {
             velocity.multiplyScalar(Math.pow(0.65, deltaSeconds * 60));
-
-            // Si ya están asentadas en la base, congelar a 0 (cero temblor)
             if (velocity.lengthSq() < 0.25) {
               velocity.set(0, 0, 0);
             }
@@ -1045,7 +1164,10 @@ export class BiomboEngineService {
 
         ball.position.addScaledVector(velocity, deltaSeconds);
 
-        // ⭐ 3. COLISIÓN CON EL CRISTAL SIN MICRO-REBOTES
+        ball.rotation.x += velocity.z * deltaSeconds * 1.25;
+        ball.rotation.z -= velocity.x * deltaSeconds * 1.25;
+        ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.35;
+
         const currentDistance = ball.position.length();
         const maxAllowedDistance = sphereRadius - ballState.radius;
 
@@ -1056,13 +1178,11 @@ export class BiomboEngineService {
 
           if (dot > 0) {
             if (isAgitating) {
-              // Rebote vivo durante el sorteo
-              const bounce = 1.65;
+              const bounce = 1.82;
               velocity.sub(normal.multiplyScalar(bounce * dot));
-              velocity.x += (Math.random() - 0.5) * 8.0;
-              velocity.z += (Math.random() - 0.5) * 8.0;
+              velocity.x += (Math.random() - 0.5) * 5.0;
+              velocity.z += (Math.random() - 0.5) * 5.0;
             } else {
-              // En reposo: absorción total del impacto (cero temblor contra el vidrio)
               velocity.sub(normal.multiplyScalar(dot));
               velocity.multiplyScalar(0.6);
             }
@@ -1070,7 +1190,6 @@ export class BiomboEngineService {
         }
       });
 
-      // ⭐ 5. CHOQUES INTER-PELOTAS (Intercambio de energía para que se dispersen al tocarse)
       const balls = this.agitationBallStates;
       for (let i = 0; i < balls.length; i++) {
         for (let j = i + 1; j < balls.length; j++) {
@@ -1091,7 +1210,7 @@ export class BiomboEngineService {
               const speedAlongNormal = relativeVelocity.dot(normal);
 
               if (speedAlongNormal > 0) {
-                const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.75);
+                const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.92);
                 balls[i].velocity.sub(impulse);
                 balls[j].velocity.add(impulse);
               }
@@ -1103,18 +1222,12 @@ export class BiomboEngineService {
 
     this.syncSecondaryAnimation();
 
-    // =========================================================================
-    // ⚙️ FÍSICA CINEMÁTICA DE BOLAS EXTRAÍDAS EN EL RIEL INFERIOR
-    // =========================================================================
-
-
     for (let index = 0; index < this.ballEffects.length; index++) {
       const anim = this.ballEffects[index];
       const elapsed = (now - anim.startAt) / 1000;
       const progress = Math.min(elapsed / anim.duration, 1);
 
       if (!anim.hasSettled) {
-        // Easing cúbico para aceleración por gravedad y deceleración en la bandeja
         const easedT = progress < 0.5
           ? 2 * progress * progress
           : 1 - Math.pow(-2 * progress + 2, 2) / 2;
@@ -1122,28 +1235,12 @@ export class BiomboEngineService {
         const currentPos = anim.curve.getPointAt(easedT);
         anim.mesh.position.copy(currentPos);
 
-        // const rollSpeed = (1 - progress * 0.6) * 0.42;
-        // anim.mesh.rotation.z -= rollSpeed; // Gira rodando hacia la derecha
-        // anim.mesh.rotation.y += rollSpeed * 0.15;
-
-        // if (progress >= 1) {
-        //   anim.hasSettled = true;
-        //   anim.mesh.position.copy(anim.targetSlotPos);
-        //   anim.mesh.rotation.set(-0.22, -Math.PI / 2, 0);
-        // }
-
-        const targetQuat = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(-0.22, -Math.PI / 2, 0)
-        );
-
         if (progress < 0.65) {
-          // Fase 1 (0% a 65%): Rueda libremente hacia la derecha (+X)
           const rollSpeed = (1 - progress * 0.4) * 0.45;
           anim.mesh.rotation.z -= rollSpeed;
           anim.mesh.rotation.y += rollSpeed * 0.12;
           anim.mesh.rotation.x = -0.22 * progress;
         } else {
-
           if (anim.startRotZ === undefined || anim.targetRotZ === undefined) {
             anim.startRotZ = anim.mesh.rotation.z;
             anim.startRotY = anim.mesh.rotation.y;
@@ -1156,24 +1253,19 @@ export class BiomboEngineService {
               targetZ -= Math.PI * 2;
             }
 
-            // ⭐ Leve inclinación en Z (-0.072 rad ≈ -4.1°) para calzar con la pendiente del riel
             const rampInclineAngleZ = -0.072;
             anim.targetRotZ = targetZ + rampInclineAngleZ;
           }
 
-          const blend = (progress - 0.65) / 0.35; // 0 a 1
-          const smoothBlend = blend * blend * (3 - 2 * blend); // Desaceleración suave (smoothstep)
+          const blend = (progress - 0.65) / 0.35;
+          const smoothBlend = blend * blend * (3 - 2 * blend);
 
-          // ⭐ Variables tipadas estrictas como 'number' para satisfacer a TypeScript
           const startZ = anim.startRotZ ?? 0;
           const targetZ = anim.targetRotZ ?? 0;
           const startY = anim.startRotY ?? 0;
           const startX = anim.startRotX ?? 0;
 
-          // 1. El giro en Z SIEMPRE sigue avanzando hacia la derecha hasta frenar a 0
           anim.mesh.rotation.z = THREE.MathUtils.lerp(startZ, targetZ, smoothBlend);
-
-          // 2. Y y X se orientan de forma fluida hacia la cámara
           anim.mesh.rotation.y = THREE.MathUtils.lerp(startY, -Math.PI / 2, smoothBlend);
           anim.mesh.rotation.x = THREE.MathUtils.lerp(startX, -0.22, smoothBlend);
         }
@@ -1181,50 +1273,13 @@ export class BiomboEngineService {
         if (progress >= 1) {
           anim.hasSettled = true;
           anim.mesh.position.copy(anim.targetSlotPos);
-          // Posición final estacionada mostrando el número al frente
           anim.mesh.rotation.set(-0.22, -Math.PI / 2, anim.targetRotZ || 0);
         }
       }
     }
 
-    this.updateCameraAnimation(now);
-
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
-    }
-  }
-
-  private updateCameraAnimation(now: number): void {
-    if (!this.camera) {
-      return;
-    }
-
-    if (this.cameraFollow) {
-      const elapsed = now - this.cameraFollow.startedAt;
-      const focusTarget = this.cameraFollow.mesh.getWorldPosition(new THREE.Vector3());
-      const viewingDirection = this.cameraHomePosition.clone()
-        .sub(this.cameraHomeTarget)
-        .normalize();
-      const focusPosition = focusTarget.clone()
-        .addScaledVector(viewingDirection, this.cameraFollowDistance);
-
-      this.camera.position.lerp(focusPosition, 0.14);
-      this.camera.lookAt(focusTarget);
-
-      if (elapsed >= this.cameraFollow.durationMs) {
-        this.cameraFollow = undefined;
-        this.cameraReturningHome = true;
-      }
-      return;
-    }
-
-    if (this.cameraReturningHome) {
-      this.camera.position.lerp(this.cameraHomePosition, 0.08);
-      this.camera.lookAt(this.cameraHomeTarget);
-      if (this.camera.position.distanceToSquared(this.cameraHomePosition) < 0.01) {
-        this.camera.position.copy(this.cameraHomePosition);
-        this.cameraReturningHome = false;
-      }
     }
   }
 
@@ -1254,16 +1309,81 @@ export class BiomboEngineService {
       secondaryBall.quaternion.copy(ball.quaternion);
       secondaryBall.scale.copy(ball.scale);
     });
+    this.syncTertiaryAnimation();
+  }
+
+  private syncTertiaryAnimation(): void {
+    if (!this.tertiaryRig) {
+      return;
+    }
+
+    const rig = this.tertiaryRig;
+    rig.mainRotationAngle = this.mainRotationAngle;
+    rig.mechanismBias = this.mechanismBias;
+    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
+    rig.rotationShaftGroup.rotation.copy(
+      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
+    );
+    if (this.mechanismGroup) {
+      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
+      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
+    }
+
+    this.agitationBalls.forEach((ball, index) => {
+      const tertiaryBall = rig.agitationBalls[index];
+      if (!tertiaryBall) {
+        return;
+      }
+      tertiaryBall.position.copy(ball.position);
+      tertiaryBall.quaternion.copy(ball.quaternion);
+      tertiaryBall.scale.copy(ball.scale);
+    });
+    this.syncQuaternaryAnimation();
+  }
+
+  private syncQuaternaryAnimation(): void {
+    if (!this.quaternaryRig) {
+      return;
+    }
+
+    const rig = this.quaternaryRig;
+    rig.mainRotationAngle = this.mainRotationAngle;
+    rig.mechanismBias = this.mechanismBias;
+    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
+    rig.rotationShaftGroup.rotation.copy(
+      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
+    );
+    if (this.mechanismGroup) {
+      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
+      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
+    }
+
+    this.agitationBalls.forEach((ball, index) => {
+      const quaternaryBall = rig.agitationBalls[index];
+      if (!quaternaryBall) {
+        return;
+      }
+      quaternaryBall.position.copy(ball.position);
+      quaternaryBall.quaternion.copy(ball.quaternion);
+      quaternaryBall.scale.copy(ball.scale);
+    });
   }
 
   public canStartRound(): boolean {
-    const states = [this.state(), ...(this.secondaryRig ? [this.secondaryState()] : [])];
+    const states = [
+      this.state(),
+      ...(this.secondaryRig ? [this.secondaryState()] : []),
+      ...(this.tertiaryRig ? [this.tertiaryState()] : []),
+      ...(this.quaternaryRig ? [this.quaternaryState()] : []),
+    ];
     return states.every((state) => state === 'IDLE' || state === 'FINISHED');
   }
 
   public isRoundFinished(): boolean {
     return this.state() === 'FINISHED'
-      && (!this.secondaryRig || this.secondaryState() === 'FINISHED');
+      && (!this.secondaryRig || this.secondaryState() === 'FINISHED')
+      && (!this.tertiaryRig || this.tertiaryState() === 'FINISHED')
+      && (!this.quaternaryRig || this.quaternaryState() === 'FINISHED');
   }
 
   public play(): void {
@@ -1273,6 +1393,8 @@ export class BiomboEngineService {
 
     this.clearTimers();
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
+    this.clearQuaternaryTimers();
     this.clearBallEffects();
     this.extractedBalls.set([]);
     this.state.set('SHUFFLING');
@@ -1299,6 +1421,34 @@ export class BiomboEngineService {
         this.secondaryDrawTimers,
       );
     }
+
+    if (this.tertiaryRig) {
+      this.tertiaryExtractedBalls.set([]);
+      this.tertiaryState.set('SHUFFLING');
+      this.startRound(
+        this.tertiaryRig.config,
+        (state) => this.tertiaryState.set(state),
+        () => this.tertiaryExtractedBalls(),
+        (balls) => this.tertiaryExtractedBalls.set(balls),
+        this.tertiaryRig.root,
+        this.tertiaryRig.agitationBalls,
+        this.tertiaryDrawTimers,
+      );
+    }
+
+    if (this.quaternaryRig) {
+      this.quaternaryExtractedBalls.set([]);
+      this.quaternaryState.set('SHUFFLING');
+      this.startRound(
+        this.quaternaryRig.config,
+        (state) => this.quaternaryState.set(state),
+        () => this.quaternaryExtractedBalls(),
+        (balls) => this.quaternaryExtractedBalls.set(balls),
+        this.quaternaryRig.root,
+        this.quaternaryRig.agitationBalls,
+        this.quaternaryDrawTimers,
+      );
+    }
   }
 
   private startRound(
@@ -1312,11 +1462,9 @@ export class BiomboEngineService {
   ): void {
     const drawSequence = generateBiomboResults(config);
 
-    // 1. Fase de agitación completa (8 segundos girando)
     const shuffleTimer = window.setTimeout(() => {
       setState('PICKING');
 
-      // 2. Extraer las bolas una por una por el fondo inferior hacia la rampa
       drawSequence.forEach((ballNumber, index) => {
         const timer = window.setTimeout(() => {
           const current = [...getExtractedBalls()];
@@ -1329,7 +1477,7 @@ export class BiomboEngineService {
             const finishTimer = window.setTimeout(() => setState('FINISHED'), 2200);
             timers.push(finishTimer);
           }
-        }, index * 2400); // 2.4s entre cada bola para ver el descenso y rodamiento completo
+        }, index * 2400);
 
         timers.push(timer);
       });
@@ -1346,43 +1494,28 @@ export class BiomboEngineService {
     agitationBalls: THREE.Mesh[],
   ): void {
     const ballRadius = 0.95;
-    const ballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
-
-    const numberTexture = this.createBallNumberTexture(ballNumber, config);
-    const material = new THREE.MeshStandardMaterial({
-      map: numberTexture,
-      roughness: 0.15,
-      metalness: 0.1,
-    });
-
-    const mesh = new THREE.Mesh(ballGeometry, material);
+    const mesh = this.createNumberedBallMesh(ballNumber, config, ballRadius);
     mesh.userData['isDrawnBall'] = true;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    // =========================================================================
-    // 🎯 ENCAJE PROFUNDO DENTRO DEL CANAL (EJE Z HACIA ADENTRO)
-    // =========================================================================
     const endOfTrackX = 19;
     const endOfTrackY = -12.40;
-    const endOfTrackZ = 0.90; // ⭐ Reducido de 2.10 a 0.90 para meter la bola DETRÁS de la pared frontal del riel
+    const endOfTrackZ = 0.90;
     const ballSpacing = 2.15;
 
-    // Pendiente real del riel negro
     const rampSlopeY = 0.072;
-    const rampSlopeZ = 0.015; // Corrección suave en Z a lo largo del canal
+    const rampSlopeZ = 0.015;
 
     const targetSlotX = endOfTrackX - (index * ballSpacing);
     const deltaX = endOfTrackX - targetSlotX;
 
-    // Altura y profundidad exactas en el interior del canal
     const targetSlotY = endOfTrackY + (deltaX * rampSlopeY);
     const targetSlotZ = endOfTrackZ - (deltaX * rampSlopeZ);
     const targetSlotPos = new THREE.Vector3(targetSlotX, targetSlotY, targetSlotZ);
 
-    // Trayectoria: cae de la esfera y entra al centro del canal
     const pStart = new THREE.Vector3(0, -8.2, 0.2);
-    const pDrop = new THREE.Vector3(0.1, -9.8, 0.60); // Cae alineado al centro del canal
+    const pDrop = new THREE.Vector3(0.1, -9.8, 0.60);
 
     const rampEntryX = 0.4;
     const pRampEntry = new THREE.Vector3(
@@ -1422,13 +1555,6 @@ export class BiomboEngineService {
       ballNumber,
       hasSettled: false,
     });
-
-    this.cameraFollow = {
-      mesh,
-      startedAt: performance.now(),
-      durationMs: this.cameraFollowDurationMs,
-    };
-    this.cameraReturningHome = false;
   }
 
   private createBallNumberTexture(value: number, config: BiomboConfig): THREE.CanvasTexture {
@@ -1443,24 +1569,20 @@ export class BiomboEngineService {
     const isYellow = config.ballType === 'yellow';
     const baseColor = isYellow ? '#ffd200' : this.agitationPalette[(value - 1) % this.agitationPalette.length];
 
-    // Fondo brillante esmaltado
     ctx.fillStyle = typeof baseColor === 'number' ? `#${baseColor.toString(16).padStart(6, '0')}` : baseColor;
     ctx.fillRect(0, 0, 256, 256);
 
-    // Círculo blanco central característico de las bolas de bingo
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(128, 128, 80, 0, Math.PI * 2);
     ctx.fill();
 
-    // Número impreso nítido
     ctx.fillStyle = '#0f1115';
     ctx.font = 'bold 90px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(value), 128, 134);
 
-    // Subrayado para el 6 y 9
     if (value === 6 || value === 9 || value === 66 || value === 99 || value === 69 || value === 96) {
       ctx.fillRect(100, 185, 56, 8);
     }
@@ -1481,11 +1603,13 @@ export class BiomboEngineService {
   public destroy(): void {
     this.clearTimers();
     this.clearSecondaryTimers();
+    this.clearTertiaryTimers();
+    this.clearQuaternaryTimers();
     this.clearBallEffects();
-    this.cameraFollow = undefined;
-    this.cameraReturningHome = false;
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
     this.renderer?.dispose();
+    this.backgroundTexture?.dispose();
+    this.backgroundTexture = undefined;
   }
 
   private clearTimers(): void {
@@ -1501,12 +1625,23 @@ export class BiomboEngineService {
     }
   }
 
-  private clearBallEffects(machineRoot?: THREE.Group): void {
-    if (!machineRoot || this.cameraFollow?.mesh.parent === machineRoot) {
-      this.cameraFollow = undefined;
-      this.cameraReturningHome = true;
+  private clearTertiaryTimers(): void {
+    this.tertiaryDrawTimers.forEach((timer) => window.clearTimeout(timer));
+    this.tertiaryDrawTimers = [];
+    if (this.tertiaryRig) {
+      this.tertiaryRig.drawTimers = this.tertiaryDrawTimers;
     }
+  }
 
+  private clearQuaternaryTimers(): void {
+    this.quaternaryDrawTimers.forEach((timer) => window.clearTimeout(timer));
+    this.quaternaryDrawTimers = [];
+    if (this.quaternaryRig) {
+      this.quaternaryRig.drawTimers = this.quaternaryDrawTimers;
+    }
+  }
+
+  private clearBallEffects(machineRoot?: THREE.Group): void {
     const remainingEffects: BallExitAnimation[] = [];
     for (const animation of this.ballEffects) {
       if (machineRoot && animation.mesh.parent !== machineRoot) {
@@ -1523,8 +1658,9 @@ export class BiomboEngineService {
     }
     this.ballEffects = remainingEffects;
 
-    // Restaurar visibilidad de bolas internas para la nueva ronda
     this.agitationBalls.forEach((b) => (b.visible = true));
     this.secondaryRig?.agitationBalls.forEach((b) => (b.visible = true));
+    this.tertiaryRig?.agitationBalls.forEach((b) => (b.visible = true));
+    this.quaternaryRig?.agitationBalls.forEach((b) => (b.visible = true));
   }
 }

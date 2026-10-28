@@ -121,13 +121,12 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
     if (changes['secondaryConfig'] && this.initialized) {
       this.engine.setSecondaryConfig(this.secondaryConfig);
     }
-    // Las máquinas terciaria y cuaternaria no están implementadas en esta versión
-    // if (changes['tertiaryConfig'] && this.initialized) {
-    //   this.engine.setTertiaryConfig(this.tertiaryConfig);
-    // }
-    // if (changes['quaternaryConfig'] && this.initialized) {
-    //   this.engine.setQuaternaryConfig(this.quaternaryConfig);
-    // }
+    if (changes['tertiaryConfig'] && this.initialized) {
+      this.engine.setTertiaryConfig(this.tertiaryConfig);
+    }
+    if (changes['quaternaryConfig'] && this.initialized) {
+      this.engine.setQuaternaryConfig(this.quaternaryConfig);
+    }
   }
 
   public async ngOnInit(): Promise<void> {
@@ -136,9 +135,8 @@ export class BiomboCanvasComponent implements OnChanges, OnInit, OnDestroy {
         this.viewportRef.nativeElement,
         this.config,
         this.secondaryConfig,
-        // Las máquinas terciaria y cuaternaria no están implementadas en esta versión
-        // this.tertiaryConfig,
-        // this.quaternaryConfig,
+        this.tertiaryConfig,
+        this.quaternaryConfig,
       );
       this.hasError.set(!!this.engine.errorMessage());
       if (this.engine.errorMessage()) {

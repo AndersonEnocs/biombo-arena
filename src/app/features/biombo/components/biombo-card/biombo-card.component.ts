@@ -38,7 +38,10 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       <button
         type="button"
         class="background-control background-control-previous"
-        [disabled]="!engine.isReady()">
+        [disabled]="!engine.isReady() || engine.isChangingBackground()"
+        [attr.aria-label]="'Fondo anterior. Actual: ' + engine.backgroundName()"
+        [title]="'Fondo anterior. Actual: ' + engine.backgroundName()"
+        (click)="engine.changeBackground(-1)">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="m15 18-6-6 6-6" />
         </svg>
@@ -46,19 +49,23 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       <button
         type="button"
         class="background-control background-control-next"
-        [disabled]="!engine.isReady()">
+        [disabled]="!engine.isReady() || engine.isChangingBackground()"
+        [attr.aria-label]="'Fondo siguiente. Actual: ' + engine.backgroundName()"
+        [title]="'Fondo siguiente. Actual: ' + engine.backgroundName()"
+        (click)="engine.changeBackground(1)">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="m9 18 6-6-6-6" />
         </svg>
       </button>
-      <!-- El cambio de fondo y errores no están implementados en esta versión -->
-      <!-- @if (engine.backgroundError()) {
+      @if (engine.backgroundError()) {
         <p class="background-error" role="alert">{{ engine.backgroundError() }}</p>
-      } -->
+      }
 
       <!-- HUD Superior Flotante (Glassmorphism) -->
       <div class="hud-top-bar"
-        [class.dual-hud]="!!secondaryConfig">
+        [class.dual-hud]="!!secondaryConfig"
+        [class.triple-hud]="!!tertiaryConfig"
+        [class.quadruple-hud]="!!quaternaryConfig">
         <div class="biombo-meta">
           <div class="machine-meta">
             <span class="biombo-title">{{ config.title }}</span>
@@ -74,23 +81,22 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
               </span>
             </div>
           }
-          <!-- Las máquinas terciaria y cuaternaria no están implementadas en esta versión -->
-          <!-- @if (tertiaryConfig) {
+          @if (tertiaryConfig) {
             <div class="machine-meta">
               <span class="biombo-title">{{ tertiaryConfig.title }}</span>
               <span class="status-pill" [class]="engine.tertiaryState().toLowerCase()">
                 {{ engine.tertiaryState() }}
               </span>
             </div>
-          } -->
-          <!-- @if (quaternaryConfig) {
+          }
+          @if (quaternaryConfig) {
             <div class="machine-meta">
               <span class="biombo-title">{{ quaternaryConfig.title }}</span>
               <span class="status-pill" [class]="engine.quaternaryState().toLowerCase()">
                 {{ engine.quaternaryState() }}
               </span>
             </div>
-          } -->
+          }
         </div>
         <div class="round-info">
           <span>RONDA: 3 BOLAS</span>
