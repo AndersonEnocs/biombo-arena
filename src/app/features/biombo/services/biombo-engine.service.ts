@@ -151,7 +151,7 @@ export class BiomboEngineService {
       this.scene.add(this.machineRoot);
 
       const aspect = width / height;
-      this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 1000);
+      this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
       this.camera.position.set(0, 0, 48);
       this.camera.lookAt(0, 0, 0);
 
@@ -1662,5 +1662,20 @@ export class BiomboEngineService {
     this.secondaryRig?.agitationBalls.forEach((b) => (b.visible = true));
     this.tertiaryRig?.agitationBalls.forEach((b) => (b.visible = true));
     this.quaternaryRig?.agitationBalls.forEach((b) => (b.visible = true));
+  }
+
+  // Ajustar FOV cuando el usuario hace zoom con OrbitControls
+  private onZoom(event: { scale: number }): void {
+    const zoomFactor = event.scale;
+    
+    // FOV más amplio cuando se hace zoom in (más cerca)
+    // FOV más estrecho cuando se hace zoom out (más lejos)
+    const currentFov = this.camera.fov;
+    const newFov = Math.max(45, Math.min(90, 
+      currentFov * zoomFactor * 1.2  // Factor de ajuste
+    ));
+    
+    this.camera.fov = newFov;
+    this.camera.updateProjectionMatrix();
   }
 }
