@@ -1679,3 +1679,4 @@ export class BiomboEngineService {
     this.camera.updateProjectionMatrix();
   }
 }
+
