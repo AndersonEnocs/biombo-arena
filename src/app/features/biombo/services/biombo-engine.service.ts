@@ -281,6 +281,7 @@ export class BiomboEngineService {
       });
 
       this.machineRoot.add(this.createLotteryTable(0xf4f4f0));
+      this.alignLotteryTable(this.machineRoot);
 
       this.buildInternalMechanism();
       this.arrangeBallsNaturally();
@@ -392,6 +393,7 @@ export class BiomboEngineService {
   private createSecondaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-beta';
+    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x17191f);
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
@@ -479,6 +481,7 @@ export class BiomboEngineService {
   private createTertiaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-gamma';
+    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0xc62828);
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
@@ -566,6 +569,7 @@ export class BiomboEngineService {
   private createQuaternaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-delta';
+    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x1565c0);
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
@@ -644,27 +648,29 @@ export class BiomboEngineService {
     }
 
 
-    const offsetX = 0.0;
-    const offsetY = 0.0;
-    const offsetZ = -10.8;
-
-    table.updateMatrixWorld(true);
-    const circleRef = table.getObjectByName('Circle005')
-      || table.getObjectByName('Circle005_1')
-      || table.getObjectByName('Back Panel');
-
-    if (circleRef) {
-      const bounds = new THREE.Box3().setFromObject(circleRef);
-      const center = bounds.getCenter(new THREE.Vector3());
-      table.position.x = -center.x + offsetX;
-      table.position.y = -center.y + offsetY;
-      table.position.z = offsetZ - center.z;
-    } else {
-      table.position.set(offsetX, -15.8 + offsetY, offsetZ);
-    }
-
     this.setLotteryTableColor(table, color);
     return table;
+  }
+
+  private alignLotteryTable(root: THREE.Group): void {
+    const table = root.getObjectByName('biombo-table-asset');
+    const machineAnchor = root.getObjectByName('sphere-rotation-pivot');
+    const tableAnchor = table?.getObjectByName('Circle005')
+      || table?.getObjectByName('Circle005_1')
+      || table?.getObjectByName('Back Panel');
+
+    if (!table || !machineAnchor || !tableAnchor) {
+      throw new Error('Error al centrar la mesa con el biombo.');
+    }
+
+    root.updateWorldMatrix(true, true);
+    const tableBounds = new THREE.Box3().setFromObject(tableAnchor);
+    const tableCenter = root.worldToLocal(tableBounds.getCenter(new THREE.Vector3()));
+    const machineCenter = root.worldToLocal(machineAnchor.getWorldPosition(new THREE.Vector3()));
+    const targetCenter = machineCenter.add(new THREE.Vector3(0, 0, -10.8));
+
+    table.position.add(targetCenter.sub(tableCenter));
+    root.updateWorldMatrix(true, true);
   }
 
   private setLotteryTableColor(root: THREE.Object3D, color: number): void {
@@ -753,6 +759,47 @@ export class BiomboEngineService {
 
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+
+    for (const root of [
+      this.machineRoot,
+      this.secondaryRig?.root,
+      this.tertiaryRig?.root,
+      this.quaternaryRig?.root,
+    ]) {
+      if (root) {
+        this.alignLotteryTableToBiombo(root);
+      }
+    }
+  }
+
+  private alignLotteryTableToBiombo(root: THREE.Group): void {
+    const table = root.getObjectByName('biombo-table-asset');
+    const machineAnchor = root.getObjectByName('sphere-rotation-pivot');
+    const tableAnchor = table?.getObjectByName('Circle005')
+      || table?.getObjectByName('Circle005_1')
+      || table?.getObjectByName('Back Panel');
+
+    if (!table || !machineAnchor || !tableAnchor) {
+      throw new Error('Error al centrar la mesa con el biombo.');
+    }
+
+    root.updateWorldMatrix(true, true);
+    const tableCenterWorld = new THREE.Box3()
+      .setFromObject(tableAnchor)
+      .getCenter(new THREE.Vector3());
+    const machineCenterScreen = machineAnchor.getWorldPosition(new THREE.Vector3()).project(this.camera);
+    const tableCenterScreen = tableCenterWorld.clone().project(this.camera);
+    const targetCenterWorld = new THREE.Vector3(
+      machineCenterScreen.x,
+      machineCenterScreen.y,
+      tableCenterScreen.z,
+    ).unproject(this.camera);
+    const currentCenterRoot = root.worldToLocal(tableCenterWorld);
+    const targetCenterRoot = root.worldToLocal(targetCenterWorld);
+
+    table.position.add(targetCenterRoot.sub(currentCenterRoot));
+    root.updateWorldMatrix(true, true);
   }
 
   private arrangeBallsNaturally(): void {
@@ -1679,4 +1726,3 @@ export class BiomboEngineService {
     this.camera.updateProjectionMatrix();
   }
 }
-
