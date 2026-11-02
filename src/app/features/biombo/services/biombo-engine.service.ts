@@ -1133,11 +1133,23 @@ export class BiomboEngineService {
     return new THREE.Mesh(geometry, this.createNumberedBallMaterial(value, config));
   }
 
-  private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshStandardMaterial {
-    return new THREE.MeshStandardMaterial({
+  // private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshStandardMaterial {
+  //   return new THREE.MeshStandardMaterial({
+  //     map: this.createBallNumberTexture(value, config),
+  //     roughness: 0.15,
+  //     metalness: 0.1,
+  //   });
+  // }
+
+  private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshPhysicalMaterial {
+    return new THREE.MeshPhysicalMaterial({
       map: this.createBallNumberTexture(value, config),
-      roughness: 0.15,
-      metalness: 0.1,
+      roughness: 0.10,
+      metalness: 0.05,
+      clearcoatRoughness: 0.03,
+      reflectivity: 0.9,
+      envMap: this.backgroundTexture,
+      envMapIntensity: 0.75,
     });
   }
 
@@ -1707,9 +1719,9 @@ export class BiomboEngineService {
 
   private createBallNumberTexture(value: number, config: BiomboConfig): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) {
       return new THREE.CanvasTexture(canvas);
     }
@@ -1718,24 +1730,34 @@ export class BiomboEngineService {
     const baseColor = isYellow ? '#ffd200' : this.agitationPalette[(value - 1) % this.agitationPalette.length];
 
     ctx.fillStyle = typeof baseColor === 'number' ? `#${baseColor.toString(16).padStart(6, '0')}` : baseColor;
-    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillRect(0, 0, 1024, 1024);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.beginPath();
+    ctx.arc(512, 512, 332, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(128, 128, 80, 0, Math.PI * 2);
+    ctx.arc(512, 512, 320, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#0f1115';
-    ctx.font = 'bold 90px Arial, sans-serif';
+    ctx.fillStyle = '#0a0c10';
+    ctx.font = 'bold 360px "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(value), 128, 134);
+    ctx.fillText(String(value), 512, 535);
 
     if (value === 6 || value === 9 || value === 66 || value === 99 || value === 69 || value === 96) {
-      ctx.fillRect(100, 185, 56, 8);
+      ctx.fillRect(390, 735, 244, 32);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = this.renderer ? this.renderer.capabilities.getMaxAnisotropy() : 16;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
     texture.needsUpdate = true;
     return texture;
   }

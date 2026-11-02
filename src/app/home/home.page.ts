@@ -31,7 +31,7 @@ import { BiomboCardComponent } from '../features/biombo/components/biombo-card/b
         <div class="header-container">
           <div class="brand">
             <span class="pulse-dot"></span>
-            <h2>TESLA LOTTERY ARENA 3D</h2>
+            <h2>LOTTERY ARENA 3D</h2>
           </div>
 
           <ion-segment [value]="mode()" (ionChange)="mode.set($any($event).detail.value)" class="mode-segment">
@@ -180,7 +180,7 @@ export class HomePage {
     id: 'biombo-alfa',
     title: 'BIOMBO ALFA',
     ballAmount: 30,
-    resultCount: 3, // Regla estricta: 3 bolas
+    resultCount: 3,
     ballType: 'color',
   };
 
@@ -188,7 +188,7 @@ export class HomePage {
     id: 'biombo-beta',
     title: 'BIOMBO BETA',
     ballAmount: 30,
-    resultCount: 3, // Regla estricta: 3 bolas
+    resultCount: 3,
     ballType: 'yellow',
   };
 
