@@ -32,6 +32,7 @@ type SecondaryBiomboRig = {
   drumGroup: THREE.Group;
   rotationShaftGroup: THREE.Group;
   mechanismGroup: THREE.Group;
+  ballGroup?: THREE.Group;
   agitationBalls: THREE.Mesh[];
   agitationBallStates: AgitationBallState[];
   drawTimers: number[];
@@ -83,14 +84,19 @@ export class BiomboEngineService {
   private mainRotationShaftGroup?: THREE.Group;
   private mechanismGroup?: THREE.Group;
   private ballGroup?: THREE.Group;
-  private mainRotationAngle = 0;
-  private mechanismBias = 0;
+  public mainRotationAngle = 0;
+  public mechanismBias = 0;
   private agitationBalls: THREE.Mesh[] = [];
   private agitationBallStates: AgitationBallState[] = [];
   private readonly lotteryTableTemplates = new Map<string, THREE.Object3D>();
   private lastAgitationFrame = 0;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
+
+  private baseCameraPosition = new THREE.Vector3(0, 0, 48);
+  private baseCameraTarget = new THREE.Vector3(0, 0, 0);
+  private currentCameraTarget = new THREE.Vector3(0, 0, 0);
+  private activeExtractingRoot: THREE.Group | null = null;
 
   private readonly agitationPalette = [
     0x00d2ff,
@@ -134,6 +140,7 @@ export class BiomboEngineService {
     this.currentBackgroundIndex = 0;
     this.isChangingBackground.set(false);
     this.mainRotationAngle = 0;
+    this.activeExtractingRoot = null;
     this.clearBallEffects();
 
     try {
@@ -154,6 +161,10 @@ export class BiomboEngineService {
       this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
       this.camera.position.set(0, 0, 48);
       this.camera.lookAt(0, 0, 0);
+
+      this.baseCameraPosition.copy(this.camera.position);
+      this.baseCameraTarget.set(0, 0, 0);
+      this.currentCameraTarget.copy(this.baseCameraTarget);
 
       const probeCanvas = document.createElement('canvas');
       if (!probeCanvas.getContext('webgl2')) {
@@ -406,6 +417,8 @@ export class BiomboEngineService {
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
     const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
+    const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
+
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
@@ -428,6 +441,7 @@ export class BiomboEngineService {
       drumGroup,
       rotationShaftGroup,
       mechanismGroup,
+      ballGroup,
       agitationBalls,
       agitationBallStates: agitationBalls.map((mesh, index) => ({
         mesh,
@@ -436,8 +450,8 @@ export class BiomboEngineService {
         radius: this.agitationBallStates[index]?.radius ?? 0.92,
       })),
       drawTimers: this.secondaryDrawTimers,
-      mainRotationAngle: this.mainRotationAngle,
-      mechanismBias: this.mechanismBias,
+      mainRotationAngle: 0,
+      mechanismBias: 0,
     };
     this.scene.add(root);
     this.secondaryState.set('IDLE');
@@ -494,6 +508,8 @@ export class BiomboEngineService {
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
     const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
+    const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
+
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
@@ -516,6 +532,7 @@ export class BiomboEngineService {
       drumGroup,
       rotationShaftGroup,
       mechanismGroup,
+      ballGroup,
       agitationBalls,
       agitationBallStates: agitationBalls.map((mesh, index) => ({
         mesh,
@@ -524,8 +541,8 @@ export class BiomboEngineService {
         radius: this.agitationBallStates[index]?.radius ?? 0.92,
       })),
       drawTimers: this.tertiaryDrawTimers,
-      mainRotationAngle: this.mainRotationAngle,
-      mechanismBias: this.mechanismBias,
+      mainRotationAngle: 0,
+      mechanismBias: 0,
     };
     this.scene.add(root);
     this.tertiaryState.set('IDLE');
@@ -582,6 +599,8 @@ export class BiomboEngineService {
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
     const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
+    const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
+
     if (!(drumGroup instanceof THREE.Group)
       || !(rotationShaftGroup instanceof THREE.Group)
       || !(mechanismGroup instanceof THREE.Group)) {
@@ -604,6 +623,7 @@ export class BiomboEngineService {
       drumGroup,
       rotationShaftGroup,
       mechanismGroup,
+      ballGroup,
       agitationBalls,
       agitationBallStates: agitationBalls.map((mesh, index) => ({
         mesh,
@@ -612,8 +632,8 @@ export class BiomboEngineService {
         radius: this.agitationBallStates[index]?.radius ?? 0.92,
       })),
       drawTimers: this.quaternaryDrawTimers,
-      mainRotationAngle: this.mainRotationAngle,
-      mechanismBias: this.mechanismBias,
+      mainRotationAngle: 0,
+      mechanismBias: 0,
     };
     this.scene.add(root);
     this.quaternaryState.set('IDLE');
@@ -646,7 +666,6 @@ export class BiomboEngineService {
       });
       table.add(part);
     }
-
 
     this.setLotteryTableColor(table, color);
     return table;
@@ -721,7 +740,7 @@ export class BiomboEngineService {
       this.tertiaryRig?.root.position.set(-frontHorizontalSeparation, -verticalSeparation, depthSeparation);
       this.quaternaryRig.root.scale.setScalar(scale);
       this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation, depthSeparation);
-      this.camera.position.set(0, 0, portrait ? 76 : 68);
+      this.baseCameraPosition.set(0, 0, portrait ? 76 : 68);
     } else if (this.tertiaryRig) {
       const portrait = width < height;
       const scale = portrait ? 0.34 : 0.42;
@@ -732,12 +751,11 @@ export class BiomboEngineService {
       this.secondaryRig?.root.position.set(0, 0, 0);
       this.tertiaryRig.root.scale.setScalar(scale);
       this.tertiaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
-      this.camera.position.set(0, 0, portrait ? 70 : 64);
+      this.baseCameraPosition.set(0, 0, portrait ? 70 : 64);
     } else if (this.secondaryRig) {
       const portrait = width < height;
       const scale = portrait ? 0.42 : 0.58;
 
-      // Calibración de posición independiente en modo dual
       const biombo1_X = portrait ? 0 : -13.5;
       const biombo1_Y = portrait ? 12.0 : 0.0;
 
@@ -750,14 +768,17 @@ export class BiomboEngineService {
       this.secondaryRig.root.scale.setScalar(scale);
       this.secondaryRig.root.position.set(biombo2_X, biombo2_Y, 0);
 
-      this.camera.position.set(0, 0, portrait ? 67 : 61);
+      this.baseCameraPosition.set(0, 0, portrait ? 67 : 61);
     } else {
       this.machineRoot.scale.setScalar(1);
       this.machineRoot.position.set(0, 0, 0);
-      this.camera.position.set(0, 0, 110.88);
+      this.baseCameraPosition.set(0, 0, 110.88);
     }
 
-    this.camera.lookAt(0, 0, 0);
+    this.baseCameraTarget.set(0, 0, 0);
+    this.camera.position.copy(this.baseCameraPosition);
+    this.currentCameraTarget.copy(this.baseCameraTarget);
+    this.camera.lookAt(this.currentCameraTarget);
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
 
@@ -1120,6 +1141,162 @@ export class BiomboEngineService {
     });
   }
 
+  private stepRigMechanics(
+    state: BiomboState,
+    drumGroup: THREE.Group | undefined,
+    shaftGroup: THREE.Group | undefined,
+    mechanismGroup: THREE.Group | undefined,
+    stateRef: { mainRotationAngle: number; mechanismBias: number },
+  ): number {
+    const isAgitating = state === 'SHUFFLING';
+    const shaftSpeed = isAgitating ? 0.068 : 0;
+    stateRef.mainRotationAngle += shaftSpeed;
+
+    if (shaftGroup) {
+      shaftGroup.rotation.set(stateRef.mainRotationAngle, 0, 0);
+    }
+    if (drumGroup) {
+      drumGroup.rotation.set(stateRef.mainRotationAngle, 0, 0);
+    }
+    if (mechanismGroup) {
+      stateRef.mechanismBias += isAgitating ? 0.03 : 0.005;
+      const agitationBoost = isAgitating ? 1 : 0.12;
+      mechanismGroup.rotation.y += (0.035 + Math.sin(stateRef.mechanismBias * 1.8) * 0.02) * agitationBoost;
+      mechanismGroup.rotation.x = (Math.sin(stateRef.mechanismBias * 2.4) * 0.6) * agitationBoost;
+      mechanismGroup.rotation.z = (Math.cos(stateRef.mechanismBias * 2.9) * 0.35) * agitationBoost;
+    }
+    return shaftSpeed;
+  }
+
+  private stepRigBallPhysics(
+    state: BiomboState,
+    ballGroup: THREE.Group | undefined,
+    ballStates: AgitationBallState[],
+    shaftSpeed: number,
+    deltaSeconds: number,
+  ): void {
+    if (ballStates.length === 0 || state === 'IDLE') {
+      return;
+    }
+
+    const isAgitating = state === 'SHUFFLING';
+    const sphereRadius = 9.8;
+    const drumQuaternion = new THREE.Quaternion();
+    if (ballGroup) {
+      ballGroup.getWorldQuaternion(drumQuaternion);
+    }
+
+    const worldGravityDir = new THREE.Vector3(0, -1, 0);
+    const localGravityDir = worldGravityDir.clone().applyQuaternion(drumQuaternion.clone().invert());
+    const drumAngularVelocityX = shaftSpeed / deltaSeconds;
+
+    ballStates.forEach((ballState) => {
+      const ball = ballState.mesh;
+      const velocity = ballState.velocity;
+
+      if (isAgitating) {
+        const currentDistance = ball.position.length();
+        const wallProximity = currentDistance / (sphereRadius - ballState.radius);
+
+        if (wallProximity > 0.82) {
+          const tangentialVy = -drumAngularVelocityX * ball.position.z * 0.45;
+          const tangentialVz = drumAngularVelocityX * ball.position.y * 0.45;
+          velocity.y += (tangentialVy - velocity.y) * 4.5 * deltaSeconds;
+          velocity.z += (tangentialVz - velocity.z) * 4.5 * deltaSeconds;
+        }
+
+        const localY = ball.position.dot(localGravityDir.clone().negate());
+        if (localY < -4.8) {
+          const loft = Math.random() * 42.0 + 34.0;
+          velocity.addScaledVector(localGravityDir.clone().negate(), loft * deltaSeconds * 2.2);
+
+          velocity.x += (Math.random() - 0.5) * 36.0 * deltaSeconds;
+          velocity.z += (Math.random() - 0.5) * 36.0 * deltaSeconds;
+        }
+
+        velocity.addScaledVector(localGravityDir, 58.0 * deltaSeconds);
+
+        velocity.x *= Math.pow(0.994, deltaSeconds * 60);
+        velocity.z *= Math.pow(0.994, deltaSeconds * 60);
+        velocity.y *= Math.pow(0.996, deltaSeconds * 60);
+
+        const maxSpeed = 54.0;
+        if (velocity.lengthSq() > maxSpeed * maxSpeed) {
+          velocity.setLength(maxSpeed);
+        }
+      } else {
+        const localY = ball.position.dot(localGravityDir.clone().negate());
+        velocity.addScaledVector(localGravityDir, 105.0 * deltaSeconds);
+
+        velocity.x *= Math.pow(0.96, deltaSeconds * 60);
+        velocity.z *= Math.pow(0.96, deltaSeconds * 60);
+        velocity.y *= Math.pow(0.97, deltaSeconds * 60);
+
+        if (localY < -6.0) {
+          velocity.multiplyScalar(Math.pow(0.65, deltaSeconds * 60));
+          if (velocity.lengthSq() < 0.25) {
+            velocity.set(0, 0, 0);
+          }
+        }
+      }
+
+      ball.position.addScaledVector(velocity, deltaSeconds);
+
+      ball.rotation.x += velocity.z * deltaSeconds * 1.25;
+      ball.rotation.z -= velocity.x * deltaSeconds * 1.25;
+      ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.35;
+
+      const currentDistance = ball.position.length();
+      const maxAllowedDistance = sphereRadius - ballState.radius;
+
+      if (currentDistance > maxAllowedDistance) {
+        const normal = ball.position.clone().normalize();
+        ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
+        const dot = velocity.dot(normal);
+
+        if (dot > 0) {
+          if (isAgitating) {
+            const bounce = 1.82;
+            velocity.sub(normal.multiplyScalar(bounce * dot));
+            velocity.x += (Math.random() - 0.5) * 5.0;
+            velocity.z += (Math.random() - 0.5) * 5.0;
+          } else {
+            velocity.sub(normal.multiplyScalar(dot));
+            velocity.multiplyScalar(0.6);
+          }
+        }
+      }
+    });
+
+    for (let i = 0; i < ballStates.length; i++) {
+      for (let j = i + 1; j < ballStates.length; j++) {
+        const delta = new THREE.Vector3().subVectors(ballStates[j].mesh.position, ballStates[i].mesh.position);
+        const distance = delta.length();
+        const minDistance = ballStates[i].radius + ballStates[j].radius;
+
+        if (distance < minDistance && distance > 0.0001) {
+          const normal = delta.clone().normalize();
+          const overlap = minDistance - distance;
+          const correction = normal.clone().multiplyScalar(overlap * 0.5);
+
+          ballStates[i].mesh.position.sub(correction);
+          ballStates[j].mesh.position.add(correction);
+
+          if (isAgitating) {
+            const relativeVelocity = new THREE.Vector3().subVectors(ballStates[i].velocity, ballStates[j].velocity);
+            const speedAlongNormal = relativeVelocity.dot(normal);
+
+            if (speedAlongNormal > 0) {
+              const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.92);
+              ballStates[i].velocity.sub(impulse);
+              ballStates[j].velocity.add(impulse);
+            }
+          }
+        }
+      }
+    }
+  }
+
   private animate(): void {
     this.animFrameId = requestAnimationFrame(() => this.animate());
     const now = performance.now();
@@ -1127,148 +1304,75 @@ export class BiomboEngineService {
       ? 1 / 60
       : Math.min((now - this.lastAgitationFrame) / 1000, 1 / 30);
     this.lastAgitationFrame = now;
-    const isAgitating = this.state() === 'SHUFFLING';
 
-    const shaftSpeed = isAgitating ? 0.068 : 0;
-    this.mainRotationAngle += shaftSpeed;
+    // 1. Cinemática y físicas de cada biombo en función de su propio estado
+    const alphaSpeed = this.stepRigMechanics(
+      this.state(),
+      this.drumGroup,
+      this.mainRotationShaftGroup,
+      this.mechanismGroup,
+      this,
+    );
+    this.stepRigBallPhysics(
+      this.state(),
+      this.ballGroup,
+      this.agitationBallStates,
+      alphaSpeed,
+      deltaSeconds,
+    );
 
-    if (this.mainRotationShaftGroup) {
-      this.mainRotationShaftGroup.rotation.set(this.mainRotationAngle, 0, 0);
+    if (this.secondaryRig) {
+      const secSpeed = this.stepRigMechanics(
+        this.secondaryState(),
+        this.secondaryRig.drumGroup,
+        this.secondaryRig.rotationShaftGroup,
+        this.secondaryRig.mechanismGroup,
+        this.secondaryRig,
+      );
+      this.stepRigBallPhysics(
+        this.secondaryState(),
+        this.secondaryRig.ballGroup,
+        this.secondaryRig.agitationBallStates,
+        secSpeed,
+        deltaSeconds,
+      );
     }
 
-    if (this.drumGroup) {
-      this.drumGroup.rotation.set(this.mainRotationAngle, 0, 0);
+    if (this.tertiaryRig) {
+      const terSpeed = this.stepRigMechanics(
+        this.tertiaryState(),
+        this.tertiaryRig.drumGroup,
+        this.tertiaryRig.rotationShaftGroup,
+        this.tertiaryRig.mechanismGroup,
+        this.tertiaryRig,
+      );
+      this.stepRigBallPhysics(
+        this.tertiaryState(),
+        this.tertiaryRig.ballGroup,
+        this.tertiaryRig.agitationBallStates,
+        terSpeed,
+        deltaSeconds,
+      );
     }
 
-    if (this.mechanismGroup) {
-      this.mechanismBias += isAgitating ? 0.03 : 0.005;
-      const agitationBoost = isAgitating ? 1 : 0.12;
-      this.mechanismGroup.rotation.y += (0.035 + Math.sin(this.mechanismBias * 1.8) * 0.02) * agitationBoost;
-      this.mechanismGroup.rotation.x = (Math.sin(this.mechanismBias * 2.4) * 0.6) * agitationBoost;
-      this.mechanismGroup.rotation.z = (Math.cos(this.mechanismBias * 2.9) * 0.35) * agitationBoost;
+    if (this.quaternaryRig) {
+      const quatSpeed = this.stepRigMechanics(
+        this.quaternaryState(),
+        this.quaternaryRig.drumGroup,
+        this.quaternaryRig.rotationShaftGroup,
+        this.quaternaryRig.mechanismGroup,
+        this.quaternaryRig,
+      );
+      this.stepRigBallPhysics(
+        this.quaternaryState(),
+        this.quaternaryRig.ballGroup,
+        this.quaternaryRig.agitationBallStates,
+        quatSpeed,
+        deltaSeconds,
+      );
     }
 
-    if (this.agitationBallStates.length > 0 && this.state() !== 'IDLE') {
-      const sphereRadius = 9.8;
-      const drumQuaternion = new THREE.Quaternion();
-      if (this.ballGroup) {
-        this.ballGroup.getWorldQuaternion(drumQuaternion);
-      }
-
-      const worldGravityDir = new THREE.Vector3(0, -1, 0);
-      const localGravityDir = worldGravityDir.clone().applyQuaternion(drumQuaternion.clone().invert());
-      const drumAngularVelocityX = shaftSpeed / deltaSeconds;
-
-      this.agitationBallStates.forEach((ballState) => {
-        const ball = ballState.mesh;
-        const velocity = ballState.velocity;
-
-        if (isAgitating) {
-          const currentDistance = ball.position.length();
-          const wallProximity = currentDistance / (sphereRadius - ballState.radius);
-
-          if (wallProximity > 0.82) {
-            const tangentialVy = -drumAngularVelocityX * ball.position.z * 0.45;
-            const tangentialVz = drumAngularVelocityX * ball.position.y * 0.45;
-            velocity.y += (tangentialVy - velocity.y) * 4.5 * deltaSeconds;
-            velocity.z += (tangentialVz - velocity.z) * 4.5 * deltaSeconds;
-          }
-
-          const localY = ball.position.dot(localGravityDir.clone().negate());
-          if (localY < -4.8) {
-            const loft = Math.random() * 42.0 + 34.0;
-            velocity.addScaledVector(localGravityDir.clone().negate(), loft * deltaSeconds * 2.2);
-
-            velocity.x += (Math.random() - 0.5) * 36.0 * deltaSeconds;
-            velocity.z += (Math.random() - 0.5) * 36.0 * deltaSeconds;
-          }
-
-          velocity.addScaledVector(localGravityDir, 58.0 * deltaSeconds);
-
-          velocity.x *= Math.pow(0.994, deltaSeconds * 60);
-          velocity.z *= Math.pow(0.994, deltaSeconds * 60);
-          velocity.y *= Math.pow(0.996, deltaSeconds * 60);
-
-          const maxSpeed = 54.0;
-          if (velocity.lengthSq() > maxSpeed * maxSpeed) {
-            velocity.setLength(maxSpeed);
-          }
-        } else {
-          const localY = ball.position.dot(localGravityDir.clone().negate());
-          velocity.addScaledVector(localGravityDir, 105.0 * deltaSeconds);
-
-          velocity.x *= Math.pow(0.96, deltaSeconds * 60);
-          velocity.z *= Math.pow(0.96, deltaSeconds * 60);
-          velocity.y *= Math.pow(0.97, deltaSeconds * 60);
-
-          if (localY < -6.0) {
-            velocity.multiplyScalar(Math.pow(0.65, deltaSeconds * 60));
-            if (velocity.lengthSq() < 0.25) {
-              velocity.set(0, 0, 0);
-            }
-          }
-        }
-
-        ball.position.addScaledVector(velocity, deltaSeconds);
-
-        ball.rotation.x += velocity.z * deltaSeconds * 1.25;
-        ball.rotation.z -= velocity.x * deltaSeconds * 1.25;
-        ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.35;
-
-        const currentDistance = ball.position.length();
-        const maxAllowedDistance = sphereRadius - ballState.radius;
-
-        if (currentDistance > maxAllowedDistance) {
-          const normal = ball.position.clone().normalize();
-          ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
-          const dot = velocity.dot(normal);
-
-          if (dot > 0) {
-            if (isAgitating) {
-              const bounce = 1.82;
-              velocity.sub(normal.multiplyScalar(bounce * dot));
-              velocity.x += (Math.random() - 0.5) * 5.0;
-              velocity.z += (Math.random() - 0.5) * 5.0;
-            } else {
-              velocity.sub(normal.multiplyScalar(dot));
-              velocity.multiplyScalar(0.6);
-            }
-          }
-        }
-      });
-
-      const balls = this.agitationBallStates;
-      for (let i = 0; i < balls.length; i++) {
-        for (let j = i + 1; j < balls.length; j++) {
-          const delta = new THREE.Vector3().subVectors(balls[j].mesh.position, balls[i].mesh.position);
-          const distance = delta.length();
-          const minDistance = balls[i].radius + balls[j].radius;
-
-          if (distance < minDistance && distance > 0.0001) {
-            const normal = delta.clone().normalize();
-            const overlap = minDistance - distance;
-            const correction = normal.clone().multiplyScalar(overlap * 0.5);
-
-            balls[i].mesh.position.sub(correction);
-            balls[j].mesh.position.add(correction);
-
-            if (isAgitating) {
-              const relativeVelocity = new THREE.Vector3().subVectors(balls[i].velocity, balls[j].velocity);
-              const speedAlongNormal = relativeVelocity.dot(normal);
-
-              if (speedAlongNormal > 0) {
-                const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.92);
-                balls[i].velocity.sub(impulse);
-                balls[j].velocity.add(impulse);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    this.syncSecondaryAnimation();
-
+    // 2. Animación de rodamiento y asentamiento de bolas en rampas
     for (let index = 0; index < this.ballEffects.length; index++) {
       const anim = this.ballEffects[index];
       const elapsed = (now - anim.startAt) / 1000;
@@ -1325,95 +1429,45 @@ export class BiomboEngineService {
       }
     }
 
+    // 3. Interpolación cinematográfica hacia el biombo activo en extracción
+    let targetCamPos: THREE.Vector3;
+    let targetCamLook: THREE.Vector3;
+
+    if (this.activeExtractingRoot) {
+      const root = this.activeExtractingRoot;
+      const currentScale = root.scale.x;
+      const posX = root.position.x;
+      const posY = root.position.y;
+      const posZ = root.position.z;
+
+      if (!this.secondaryRig) {
+        targetCamPos = new THREE.Vector3(4.0, -5.2, this.baseCameraPosition.z * 0.65);
+        targetCamLook = new THREE.Vector3(5.5, -9.5, 0);
+      } else {
+        targetCamPos = new THREE.Vector3(
+          posX + 4.5 * currentScale,
+          posY - 5.5 * currentScale,
+          posZ + 36.0,
+        );
+        targetCamLook = new THREE.Vector3(
+          posX + 7.5 * currentScale,
+          posY - 10.5 * currentScale,
+          posZ,
+        );
+      }
+    } else {
+      targetCamPos = this.baseCameraPosition;
+      targetCamLook = this.baseCameraTarget;
+    }
+
+    const camSmooth = Math.min(1, deltaSeconds * 2.4);
+    this.camera.position.lerp(targetCamPos, camSmooth);
+    this.currentCameraTarget.lerp(targetCamLook, camSmooth);
+    this.camera.lookAt(this.currentCameraTarget);
+
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
     }
-  }
-
-  private syncSecondaryAnimation(): void {
-    if (!this.secondaryRig) {
-      return;
-    }
-
-    const rig = this.secondaryRig;
-    rig.mainRotationAngle = this.mainRotationAngle;
-    rig.mechanismBias = this.mechanismBias;
-    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
-    rig.rotationShaftGroup.rotation.copy(
-      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
-    );
-    if (this.mechanismGroup) {
-      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
-      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
-    }
-
-    this.agitationBalls.forEach((ball, index) => {
-      const secondaryBall = rig.agitationBalls[index];
-      if (!secondaryBall) {
-        return;
-      }
-      secondaryBall.position.copy(ball.position);
-      secondaryBall.quaternion.copy(ball.quaternion);
-      secondaryBall.scale.copy(ball.scale);
-    });
-    this.syncTertiaryAnimation();
-  }
-
-  private syncTertiaryAnimation(): void {
-    if (!this.tertiaryRig) {
-      return;
-    }
-
-    const rig = this.tertiaryRig;
-    rig.mainRotationAngle = this.mainRotationAngle;
-    rig.mechanismBias = this.mechanismBias;
-    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
-    rig.rotationShaftGroup.rotation.copy(
-      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
-    );
-    if (this.mechanismGroup) {
-      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
-      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
-    }
-
-    this.agitationBalls.forEach((ball, index) => {
-      const tertiaryBall = rig.agitationBalls[index];
-      if (!tertiaryBall) {
-        return;
-      }
-      tertiaryBall.position.copy(ball.position);
-      tertiaryBall.quaternion.copy(ball.quaternion);
-      tertiaryBall.scale.copy(ball.scale);
-    });
-    this.syncQuaternaryAnimation();
-  }
-
-  private syncQuaternaryAnimation(): void {
-    if (!this.quaternaryRig) {
-      return;
-    }
-
-    const rig = this.quaternaryRig;
-    rig.mainRotationAngle = this.mainRotationAngle;
-    rig.mechanismBias = this.mechanismBias;
-    rig.drumGroup.rotation.copy(this.drumGroup?.rotation ?? rig.drumGroup.rotation);
-    rig.rotationShaftGroup.rotation.copy(
-      this.mainRotationShaftGroup?.rotation ?? rig.rotationShaftGroup.rotation,
-    );
-    if (this.mechanismGroup) {
-      rig.mechanismGroup.rotation.copy(this.mechanismGroup.rotation);
-      rig.mechanismGroup.position.copy(this.mechanismGroup.position);
-    }
-
-    this.agitationBalls.forEach((ball, index) => {
-      const quaternaryBall = rig.agitationBalls[index];
-      if (!quaternaryBall) {
-        return;
-      }
-      quaternaryBall.position.copy(ball.position);
-      quaternaryBall.quaternion.copy(ball.quaternion);
-      quaternaryBall.scale.copy(ball.scale);
-    });
   }
 
   public canStartRound(): boolean {
@@ -1444,58 +1498,101 @@ export class BiomboEngineService {
     this.clearQuaternaryTimers();
     this.clearBallEffects();
     this.extractedBalls.set([]);
-    this.state.set('SHUFFLING');
-    this.startRound(
-      this.config,
-      (state) => this.state.set(state),
-      () => this.extractedBalls(),
-      (balls) => this.extractedBalls.set(balls),
-      this.machineRoot,
-      this.agitationBalls,
-      this.drawTimers,
-    );
+    this.secondaryExtractedBalls.set([]);
+    this.tertiaryExtractedBalls.set([]);
+    this.quaternaryExtractedBalls.set([]);
+
+    interface BiomboStep {
+      config: BiomboConfig;
+      setState: (s: BiomboState) => void;
+      getExtracted: () => number[];
+      setExtracted: (b: number[]) => void;
+      root: THREE.Group;
+      agitationBalls: THREE.Mesh[];
+      timers: number[];
+    }
+
+    const steps: BiomboStep[] = [
+      {
+        config: this.config,
+        setState: (s) => this.state.set(s),
+        getExtracted: () => this.extractedBalls(),
+        setExtracted: (b) => this.extractedBalls.set(b),
+        root: this.machineRoot,
+        agitationBalls: this.agitationBalls,
+        timers: this.drawTimers,
+      },
+    ];
 
     if (this.secondaryRig) {
-      this.secondaryExtractedBalls.set([]);
-      this.secondaryState.set('SHUFFLING');
-      this.startRound(
-        this.secondaryRig.config,
-        (state) => this.secondaryState.set(state),
-        () => this.secondaryExtractedBalls(),
-        (balls) => this.secondaryExtractedBalls.set(balls),
-        this.secondaryRig.root,
-        this.secondaryRig.agitationBalls,
-        this.secondaryDrawTimers,
-      );
+      steps.push({
+        config: this.secondaryRig.config,
+        setState: (s) => this.secondaryState.set(s),
+        getExtracted: () => this.secondaryExtractedBalls(),
+        setExtracted: (b) => this.secondaryExtractedBalls.set(b),
+        root: this.secondaryRig.root,
+        agitationBalls: this.secondaryRig.agitationBalls,
+        timers: this.secondaryDrawTimers,
+      });
     }
 
     if (this.tertiaryRig) {
-      this.tertiaryExtractedBalls.set([]);
-      this.tertiaryState.set('SHUFFLING');
-      this.startRound(
-        this.tertiaryRig.config,
-        (state) => this.tertiaryState.set(state),
-        () => this.tertiaryExtractedBalls(),
-        (balls) => this.tertiaryExtractedBalls.set(balls),
-        this.tertiaryRig.root,
-        this.tertiaryRig.agitationBalls,
-        this.tertiaryDrawTimers,
-      );
+      steps.push({
+        config: this.tertiaryRig.config,
+        setState: (s) => this.tertiaryState.set(s),
+        getExtracted: () => this.tertiaryExtractedBalls(),
+        setExtracted: (b) => this.tertiaryExtractedBalls.set(b),
+        root: this.tertiaryRig.root,
+        agitationBalls: this.tertiaryRig.agitationBalls,
+        timers: this.tertiaryDrawTimers,
+      });
     }
 
     if (this.quaternaryRig) {
-      this.quaternaryExtractedBalls.set([]);
-      this.quaternaryState.set('SHUFFLING');
-      this.startRound(
-        this.quaternaryRig.config,
-        (state) => this.quaternaryState.set(state),
-        () => this.quaternaryExtractedBalls(),
-        (balls) => this.quaternaryExtractedBalls.set(balls),
-        this.quaternaryRig.root,
-        this.quaternaryRig.agitationBalls,
-        this.quaternaryDrawTimers,
-      );
+      steps.push({
+        config: this.quaternaryRig.config,
+        setState: (s) => this.quaternaryState.set(s),
+        getExtracted: () => this.quaternaryExtractedBalls(),
+        setExtracted: (b) => this.quaternaryExtractedBalls.set(b),
+        root: this.quaternaryRig.root,
+        agitationBalls: this.quaternaryRig.agitationBalls,
+        timers: this.quaternaryDrawTimers,
+      });
     }
+
+    const executeStep = (stepIndex: number) => {
+      if (stepIndex >= steps.length) {
+        this.activeExtractingRoot = null;
+        return;
+      }
+
+      const currentStep = steps[stepIndex];
+      currentStep.setState('SHUFFLING');
+
+      this.startRound(
+        currentStep.config,
+        (s) => {
+          currentStep.setState(s);
+          if (s === 'PICKING') {
+            this.activeExtractingRoot = currentStep.root;
+          }
+        },
+        currentStep.getExtracted,
+        currentStep.setExtracted,
+        currentStep.root,
+        currentStep.agitationBalls,
+        currentStep.timers,
+        () => {
+          const pauseTimer = window.setTimeout(() => {
+            this.activeExtractingRoot = null;
+            executeStep(stepIndex + 1);
+          }, 900);
+          currentStep.timers.push(pauseTimer);
+        },
+      );
+    };
+
+    executeStep(0);
   }
 
   private startRound(
@@ -1506,6 +1603,7 @@ export class BiomboEngineService {
     machineRoot: THREE.Group,
     agitationBalls: THREE.Mesh[],
     timers: number[],
+    onFinished?: () => void,
   ): void {
     const drawSequence = generateBiomboResults(config);
 
@@ -1521,7 +1619,10 @@ export class BiomboEngineService {
           this.spawnBallExitThroughBottom(ballNumber, index, config, machineRoot, agitationBalls);
 
           if (index === drawSequence.length - 1) {
-            const finishTimer = window.setTimeout(() => setState('FINISHED'), 2200);
+            const finishTimer = window.setTimeout(() => {
+              setState('FINISHED');
+              onFinished?.();
+            }, 2200);
             timers.push(finishTimer);
           }
         }, index * 2400);
@@ -1711,17 +1812,10 @@ export class BiomboEngineService {
     this.quaternaryRig?.agitationBalls.forEach((b) => (b.visible = true));
   }
 
-  // Ajustar FOV cuando el usuario hace zoom con OrbitControls
   private onZoom(event: { scale: number }): void {
     const zoomFactor = event.scale;
-    
-    // FOV más amplio cuando se hace zoom in (más cerca)
-    // FOV más estrecho cuando se hace zoom out (más lejos)
     const currentFov = this.camera.fov;
-    const newFov = Math.max(45, Math.min(90, 
-      currentFov * zoomFactor * 1.2  // Factor de ajuste
-    ));
-    
+    const newFov = Math.max(45, Math.min(90, currentFov * zoomFactor * 1.2));
     this.camera.fov = newFov;
     this.camera.updateProjectionMatrix();
   }
