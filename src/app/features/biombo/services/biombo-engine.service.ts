@@ -24,6 +24,8 @@ type AgitationBallState = {
   velocity: THREE.Vector3;
   phase: number;
   radius: number;
+  isDropping?: boolean;
+  dropDelay?: number;
 };
 
 type SecondaryBiomboRig = {
@@ -295,7 +297,10 @@ export class BiomboEngineService {
       this.alignLotteryTable(this.machineRoot);
 
       this.buildInternalMechanism();
-      this.arrangeBallsNaturally();
+
+      // ⭐ Estacionamiento inicial en los rieles superiores (Back Wall)
+      this.stageBallsInChutes(this.agitationBalls, this.agitationBallStates, this.ballGroup);
+
       if (secondaryConfig) {
         this.createSecondaryRig(secondaryConfig);
       }
@@ -435,6 +440,15 @@ export class BiomboEngineService {
     });
     this.applyAgitationBallAppearance(agitationBalls, config);
 
+    const rigStates = agitationBalls.map((mesh, index) => ({
+      mesh,
+      velocity: new THREE.Vector3(),
+      phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
+      radius: this.agitationBallStates[index]?.radius ?? 0.92,
+    }));
+
+    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+
     this.secondaryRig = {
       config,
       root,
@@ -443,12 +457,7 @@ export class BiomboEngineService {
       mechanismGroup,
       ballGroup,
       agitationBalls,
-      agitationBallStates: agitationBalls.map((mesh, index) => ({
-        mesh,
-        velocity: new THREE.Vector3(),
-        phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
-        radius: this.agitationBallStates[index]?.radius ?? 0.92,
-      })),
+      agitationBallStates: rigStates,
       drawTimers: this.secondaryDrawTimers,
       mainRotationAngle: 0,
       mechanismBias: 0,
@@ -526,6 +535,15 @@ export class BiomboEngineService {
     });
     this.applyAgitationBallAppearance(agitationBalls, config);
 
+    const rigStates = agitationBalls.map((mesh, index) => ({
+      mesh,
+      velocity: new THREE.Vector3(),
+      phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
+      radius: this.agitationBallStates[index]?.radius ?? 0.92,
+    }));
+
+    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+
     this.tertiaryRig = {
       config,
       root,
@@ -534,12 +552,7 @@ export class BiomboEngineService {
       mechanismGroup,
       ballGroup,
       agitationBalls,
-      agitationBallStates: agitationBalls.map((mesh, index) => ({
-        mesh,
-        velocity: new THREE.Vector3(),
-        phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
-        radius: this.agitationBallStates[index]?.radius ?? 0.92,
-      })),
+      agitationBallStates: rigStates,
       drawTimers: this.tertiaryDrawTimers,
       mainRotationAngle: 0,
       mechanismBias: 0,
@@ -617,6 +630,15 @@ export class BiomboEngineService {
     });
     this.applyAgitationBallAppearance(agitationBalls, config);
 
+    const rigStates = agitationBalls.map((mesh, index) => ({
+      mesh,
+      velocity: new THREE.Vector3(),
+      phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
+      radius: this.agitationBallStates[index]?.radius ?? 0.92,
+    }));
+
+    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+
     this.quaternaryRig = {
       config,
       root,
@@ -625,12 +647,7 @@ export class BiomboEngineService {
       mechanismGroup,
       ballGroup,
       agitationBalls,
-      agitationBallStates: agitationBalls.map((mesh, index) => ({
-        mesh,
-        velocity: new THREE.Vector3(),
-        phase: this.agitationBallStates[index]?.phase ?? index * 0.71,
-        radius: this.agitationBallStates[index]?.radius ?? 0.92,
-      })),
+      agitationBallStates: rigStates,
       drawTimers: this.quaternaryDrawTimers,
       mainRotationAngle: 0,
       mechanismBias: 0,
@@ -823,83 +840,59 @@ export class BiomboEngineService {
     root.updateWorldMatrix(true, true);
   }
 
-  private arrangeBallsNaturally(): void {
-    if (!this.agitationBalls || this.agitationBalls.length === 0) return;
+  // ⭐ ESTACIONAMIENTO DE BOLAS EN LOS RIELES VERTICALES SUPERIORES (BACK WALL)
+  private stageBallsInChutes(
+    balls: THREE.Mesh[],
+    ballStates: AgitationBallState[],
+    ballGroup?: THREE.Group,
+  ): void {
+    if (!balls || balls.length === 0) return;
 
-    const totalBalls = this.agitationBalls.length;
-    const ballRadius = this.agitationBallStates[0]?.radius || 0.95;
-    const minDist = ballRadius * 2.05;
+    const numChutes = 8;
+    const chuteWidth = 15;
+    const startX = -chuteWidth / 2;
+    const stepX = chuteWidth / (numChutes - 1);
+    const ballRadius = ballStates[0]?.radius || 0.92;
+    const rowSpacing = ballRadius * 2.1;
 
-    let bowlCenterY = -8.5;
-    if (this.solids['hollow']?.mesh) {
-      const box = new THREE.Box3().setFromObject(this.solids['hollow'].mesh);
-      bowlCenterY = box.min.y + ballRadius + 0.45;
-    }
+    for (let index = 0; index < balls.length; index++) {
+      const ball = balls[index];
+      const col = index % numChutes;
+      const row = Math.floor(index / numChutes);
 
-    const bowlCurvature = 0.052;
-    const positions: THREE.Vector3[] = [];
-    let currentLayer = 0;
-    let ballsInCurrentLayer = 0;
-    let maxInLayer = 1;
+      const x = startX + col * stepX;
+      // Altura en los rieles verticales superiores
+      const y = 11.2 + row * rowSpacing;
+      const z = 0.0;
 
-    for (let i = 0; i < totalBalls; i++) {
-      if (ballsInCurrentLayer >= maxInLayer) {
-        currentLayer++;
-        ballsInCurrentLayer = 0;
-        maxInLayer = Math.min(6 * currentLayer, 18);
+      const targetPos = new THREE.Vector3(x, y, z);
+      if (ballGroup) {
+        ballGroup.worldToLocal(targetPos);
       }
+      ball.position.copy(targetPos);
+      ball.rotation.set(0, 0, 0);
+      ball.visible = true;
 
-      let pos: THREE.Vector3;
-      if (currentLayer === 0) {
-        pos = new THREE.Vector3(0, bowlCenterY, 0);
-      } else {
-        const angle = (ballsInCurrentLayer / maxInLayer) * Math.PI * 2 + (currentLayer * 0.55);
-        const radiusDist = currentLayer * (minDist * 0.9);
-        const x = Math.cos(angle) * radiusDist;
-        const z = Math.sin(angle) * radiusDist;
-        const y = bowlCenterY + (radiusDist * radiusDist * bowlCurvature) + (currentLayer * 0.32);
-        pos = new THREE.Vector3(x, y, z);
-      }
-
-      positions.push(pos);
-      ballsInCurrentLayer++;
-    }
-
-    for (let iter = 0; iter < 25; iter++) {
-      for (let i = 0; i < positions.length; i++) {
-        for (let j = i + 1; j < positions.length; j++) {
-          const delta = new THREE.Vector3().subVectors(positions[i], positions[j]);
-          const dist = delta.length();
-
-          if (dist < minDist && dist > 0.0001) {
-            const overlap = (minDist - dist) * 0.5;
-            delta.normalize().multiplyScalar(overlap);
-            positions[i].add(delta);
-            positions[j].sub(delta);
-          }
-        }
-
-        const distFromCenter = Math.sqrt(positions[i].x ** 2 + positions[i].z ** 2);
-        const floorY = bowlCenterY + (distFromCenter * distFromCenter * bowlCurvature);
-        if (positions[i].y < floorY) {
-          positions[i].y = floorY;
-        }
+      if (ballStates[index]) {
+        ballStates[index].velocity.set(0, 0, 0);
+        ballStates[index].isDropping = false;
+        ballStates[index].dropDelay = 0;
       }
     }
+  }
 
-    for (let index = 0; index < totalBalls; index++) {
-      const ball = this.agitationBalls[index];
-      const worldPos = positions[index].clone();
-
-      if (this.ballGroup) {
-        this.ballGroup.worldToLocal(worldPos);
-      }
-      ball.position.copy(worldPos);
-
-      if (this.agitationBallStates[index]) {
-        this.agitationBallStates[index].velocity.set(0, 0, 0);
-      }
-    }
+  // ⭐ ACTIVACIÓN DE LA CAÍDA ESCALONADA EN CASCADA
+  private triggerBallDrop(ballStates: AgitationBallState[]): void {
+    const numChutes = 8;
+    ballStates.forEach((ballState, index) => {
+      const col = index % numChutes;
+      const row = Math.floor(index / numChutes);
+      // Las bolas de abajo caen primero, con leve desfase por columna
+      const delay = row * 0.16 + (col % 2 === 0 ? 0.04 : 0.1) + Math.random() * 0.05;
+      ballState.isDropping = true;
+      ballState.dropDelay = delay;
+      ballState.velocity.set(0, 0, 0);
+    });
   }
 
   private buildDrumPivot(hollow: SolidEntity): void {
@@ -1117,6 +1110,8 @@ export class BiomboEngineService {
         velocity: new THREE.Vector3(0, 0, 0),
         phase: index * 0.71,
         radius: ballRadius,
+        isDropping: false,
+        dropDelay: 0,
       });
     }
   }
@@ -1132,14 +1127,6 @@ export class BiomboEngineService {
     const geometry = new THREE.SphereGeometry(radius, 32, 32);
     return new THREE.Mesh(geometry, this.createNumberedBallMaterial(value, config));
   }
-
-  // private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshStandardMaterial {
-  //   return new THREE.MeshStandardMaterial({
-  //     map: this.createBallNumberTexture(value, config),
-  //     roughness: 0.15,
-  //     metalness: 0.1,
-  //   });
-  // }
 
   private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshPhysicalMaterial {
     return new THREE.MeshPhysicalMaterial({
@@ -1205,6 +1192,27 @@ export class BiomboEngineService {
     ballStates.forEach((ballState) => {
       const ball = ballState.mesh;
       const velocity = ballState.velocity;
+
+      // ⭐ FASE DE DESCENSO DESDE LOS RIELES SUPERIORES
+      if (ballState.isDropping) {
+        if (ballState.dropDelay && ballState.dropDelay > 0) {
+          ballState.dropDelay -= deltaSeconds;
+          return;
+        }
+
+        // Aceleración gravitacional directa hacia el interior del biombo
+        velocity.y -= 75.0 * deltaSeconds;
+        velocity.x += -ball.position.x * 2.2 * deltaSeconds;
+        velocity.z += -ball.position.z * 2.2 * deltaSeconds;
+
+        ball.position.addScaledVector(velocity, deltaSeconds);
+
+        // Cuando la bola ingresa por la parte superior del cristal (Y < 7.0), entra a la física de colisión
+        if (ball.position.y < 7.0) {
+          ballState.isDropping = false;
+        }
+        return;
+      }
 
       if (isAgitating) {
         const currentDistance = ball.position.length();
@@ -1317,7 +1325,7 @@ export class BiomboEngineService {
       : Math.min((now - this.lastAgitationFrame) / 1000, 1 / 30);
     this.lastAgitationFrame = now;
 
-    // 1. Cinemática y físicas de cada biombo en función de su propio estado
+    // 1. Cinemática y físicas independientes por biombo
     const alphaSpeed = this.stepRigMechanics(
       this.state(),
       this.drumGroup,
@@ -1384,7 +1392,7 @@ export class BiomboEngineService {
       );
     }
 
-    // 2. Animación de rodamiento y asentamiento de bolas en rampas
+    // 2. Animación de rodamiento y frenado en rampas
     for (let index = 0; index < this.ballEffects.length; index++) {
       const anim = this.ballEffects[index];
       const elapsed = (now - anim.startAt) / 1000;
@@ -1497,6 +1505,14 @@ export class BiomboEngineService {
       && (!this.secondaryRig || this.secondaryState() === 'FINISHED')
       && (!this.tertiaryRig || this.tertiaryState() === 'FINISHED')
       && (!this.quaternaryRig || this.quaternaryState() === 'FINISHED');
+  }
+
+  private getRigBallStates(machineRoot: THREE.Group): AgitationBallState[] {
+    if (machineRoot === this.machineRoot) return this.agitationBallStates;
+    if (this.secondaryRig && machineRoot === this.secondaryRig.root) return this.secondaryRig.agitationBallStates;
+    if (this.tertiaryRig && machineRoot === this.tertiaryRig.root) return this.tertiaryRig.agitationBallStates;
+    if (this.quaternaryRig && machineRoot === this.quaternaryRig.root) return this.quaternaryRig.agitationBallStates;
+    return this.agitationBallStates;
   }
 
   public play(): void {
@@ -1618,6 +1634,10 @@ export class BiomboEngineService {
     onFinished?: () => void,
   ): void {
     const drawSequence = generateBiomboResults(config);
+
+    // ⭐ Disparo de caída natural de las bolas desde los rieles superiores
+    const rigStates = this.getRigBallStates(machineRoot);
+    this.triggerBallDrop(rigStates);
 
     const shuffleTimer = window.setTimeout(() => {
       setState('PICKING');
@@ -1828,10 +1848,17 @@ export class BiomboEngineService {
     }
     this.ballEffects = remainingEffects;
 
-    this.agitationBalls.forEach((b) => (b.visible = true));
-    this.secondaryRig?.agitationBalls.forEach((b) => (b.visible = true));
-    this.tertiaryRig?.agitationBalls.forEach((b) => (b.visible = true));
-    this.quaternaryRig?.agitationBalls.forEach((b) => (b.visible = true));
+    // Restaurar bolas a sus rieles verticales superiores
+    this.stageBallsInChutes(this.agitationBalls, this.agitationBallStates, this.ballGroup);
+    if (this.secondaryRig) {
+      this.stageBallsInChutes(this.secondaryRig.agitationBalls, this.secondaryRig.agitationBallStates, this.secondaryRig.ballGroup);
+    }
+    if (this.tertiaryRig) {
+      this.stageBallsInChutes(this.tertiaryRig.agitationBalls, this.tertiaryRig.agitationBallStates, this.tertiaryRig.ballGroup);
+    }
+    if (this.quaternaryRig) {
+      this.stageBallsInChutes(this.quaternaryRig.agitationBalls, this.quaternaryRig.agitationBallStates, this.quaternaryRig.ballGroup);
+    }
   }
 
   private onZoom(event: { scale: number }): void {
