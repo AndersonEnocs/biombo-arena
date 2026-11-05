@@ -103,6 +103,7 @@ export class BiomboEngineService {
   private baseCameraTarget = new THREE.Vector3(0, 0, 0);
   private currentCameraTarget = new THREE.Vector3(0, 0, 0);
   private activeExtractingRoot: THREE.Group | null = null;
+  private cameraSequence: 'overview' | 'shuffle' | 'draw' = 'overview';
 
   private readonly agitationPalette = [
     0x00d2ff,
@@ -147,6 +148,7 @@ export class BiomboEngineService {
     this.isChangingBackground.set(false);
     this.mainRotationAngle = 0;
     this.activeExtractingRoot = null;
+    this.cameraSequence = 'overview';
     this.clearBallEffects();
 
     try {
@@ -313,7 +315,7 @@ export class BiomboEngineService {
       this.buildInternalMechanism();
 
       // ⭐ Estacionamiento inicial en los rieles superiores (Back Wall)
-      this.stageBallsInChutes(this.agitationBalls, this.agitationBallStates, this.ballGroup);
+      this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
 
       if (secondaryConfig) {
         this.createSecondaryRig(secondaryConfig);
@@ -494,7 +496,7 @@ export class BiomboEngineService {
       radius: this.agitationBallStates[index]?.radius ?? 0.92,
     }));
 
-    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+    this.stageBallsInChutes(root, agitationBalls, rigStates, ballGroup);
 
     this.secondaryRig = {
       config,
@@ -589,7 +591,7 @@ export class BiomboEngineService {
       radius: this.agitationBallStates[index]?.radius ?? 0.92,
     }));
 
-    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+    this.stageBallsInChutes(root, agitationBalls, rigStates, ballGroup);
 
     this.tertiaryRig = {
       config,
@@ -684,7 +686,7 @@ export class BiomboEngineService {
       radius: this.agitationBallStates[index]?.radius ?? 0.92,
     }));
 
-    this.stageBallsInChutes(agitationBalls, rigStates, ballGroup);
+    this.stageBallsInChutes(root, agitationBalls, rigStates, ballGroup);
 
     this.quaternaryRig = {
       config,
@@ -889,11 +891,15 @@ export class BiomboEngineService {
 
   // ⭐ ESTACIONAMIENTO DE BOLAS EN LOS RIELES VERTICALES SUPERIORES (BACK WALL)
   private stageBallsInChutes(
+    machineRoot: THREE.Group,
     balls: THREE.Mesh[],
     ballStates: AgitationBallState[],
     ballGroup?: THREE.Group,
   ): void {
     if (!balls || balls.length === 0) return;
+
+    machineRoot.updateWorldMatrix(true, true);
+    ballGroup?.updateWorldMatrix(true, false);
 
     const numChutes = 8;
     const chuteWidth = 15;
@@ -912,7 +918,7 @@ export class BiomboEngineService {
       const y = 11.2 + row * rowSpacing;
       const z = 0.0;
 
-      const targetPos = new THREE.Vector3(x, y, z);
+      const targetPos = machineRoot.localToWorld(new THREE.Vector3(x, y, z));
       if (ballGroup) {
         ballGroup.worldToLocal(targetPos);
       }
@@ -1496,29 +1502,37 @@ export class BiomboEngineService {
       }
     }
 
-    // 3. Interpolación cinematográfica hacia el biombo activo en extracción
+    // 3. Two-stage cinematic framing: zoom in for the shuffle, then focus on the ball exit.
     let targetCamPos: THREE.Vector3;
     let targetCamLook: THREE.Vector3;
 
     if (this.activeExtractingRoot) {
       const root = this.activeExtractingRoot;
-      const currentScale = root.scale.x;
+      const scale = Math.max(root.scale.x, 0.01);
       const posX = root.position.x;
       const posY = root.position.y;
       const posZ = root.position.z;
 
-      if (!this.secondaryRig) {
-        targetCamPos = new THREE.Vector3(4.0, -5.2, this.baseCameraPosition.z * 0.65);
-        targetCamLook = new THREE.Vector3(5.5, -9.5, 0);
-      } else {
+      if (this.cameraSequence === 'draw') {
         targetCamPos = new THREE.Vector3(
-          posX + 4.5 * currentScale,
-          posY - 5.5 * currentScale,
-          posZ + 36.0,
+          posX + 13.5 * scale,
+          posY - 5.5 * scale,
+          posZ + 38 * scale,
         );
         targetCamLook = new THREE.Vector3(
-          posX + 7.5 * currentScale,
-          posY - 10.5 * currentScale,
+          posX + 9 * scale,
+          posY - 10 * scale,
+          posZ,
+        );
+      } else {
+        targetCamPos = new THREE.Vector3(
+          posX + 3 * scale,
+          posY + 2 * scale,
+          posZ + 52 * scale,
+        );
+        targetCamLook = new THREE.Vector3(
+          posX,
+          posY - 1 * scale,
           posZ,
         );
       }
@@ -1527,7 +1541,7 @@ export class BiomboEngineService {
       targetCamLook = this.baseCameraTarget;
     }
 
-    const camSmooth = Math.min(1, deltaSeconds * 2.4);
+    const camSmooth = 1 - Math.exp(-deltaSeconds * 3.2);
     this.camera.position.lerp(targetCamPos, camSmooth);
     this.currentCameraTarget.lerp(targetCamLook, camSmooth);
     this.camera.lookAt(this.currentCameraTarget);
@@ -1638,10 +1652,13 @@ export class BiomboEngineService {
     const executeStep = (stepIndex: number) => {
       if (stepIndex >= steps.length) {
         this.activeExtractingRoot = null;
+        this.cameraSequence = 'overview';
         return;
       }
 
       const currentStep = steps[stepIndex];
+      this.activeExtractingRoot = currentStep.root;
+      this.cameraSequence = 'shuffle';
       currentStep.setState('SHUFFLING');
 
       this.startRound(
@@ -1650,6 +1667,7 @@ export class BiomboEngineService {
           currentStep.setState(s);
           if (s === 'PICKING') {
             this.activeExtractingRoot = currentStep.root;
+            this.cameraSequence = 'draw';
           }
         },
         currentStep.getExtracted,
@@ -1660,6 +1678,7 @@ export class BiomboEngineService {
         () => {
           const pauseTimer = window.setTimeout(() => {
             this.activeExtractingRoot = null;
+            this.cameraSequence = 'overview';
             executeStep(stepIndex + 1);
           }, 900);
           currentStep.timers.push(pauseTimer);
@@ -1911,15 +1930,30 @@ export class BiomboEngineService {
     this.ballEffects = remainingEffects;
 
     // Restaurar bolas a sus rieles verticales superiores
-    this.stageBallsInChutes(this.agitationBalls, this.agitationBallStates, this.ballGroup);
+    this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
     if (this.secondaryRig) {
-      this.stageBallsInChutes(this.secondaryRig.agitationBalls, this.secondaryRig.agitationBallStates, this.secondaryRig.ballGroup);
+      this.stageBallsInChutes(
+        this.secondaryRig.root,
+        this.secondaryRig.agitationBalls,
+        this.secondaryRig.agitationBallStates,
+        this.secondaryRig.ballGroup,
+      );
     }
     if (this.tertiaryRig) {
-      this.stageBallsInChutes(this.tertiaryRig.agitationBalls, this.tertiaryRig.agitationBallStates, this.tertiaryRig.ballGroup);
+      this.stageBallsInChutes(
+        this.tertiaryRig.root,
+        this.tertiaryRig.agitationBalls,
+        this.tertiaryRig.agitationBallStates,
+        this.tertiaryRig.ballGroup,
+      );
     }
     if (this.quaternaryRig) {
-      this.stageBallsInChutes(this.quaternaryRig.agitationBalls, this.quaternaryRig.agitationBallStates, this.quaternaryRig.ballGroup);
+      this.stageBallsInChutes(
+        this.quaternaryRig.root,
+        this.quaternaryRig.agitationBalls,
+        this.quaternaryRig.agitationBallStates,
+        this.quaternaryRig.ballGroup,
+      );
     }
   }
 
