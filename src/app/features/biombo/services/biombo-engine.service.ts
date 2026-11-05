@@ -65,6 +65,10 @@ export class BiomboEngineService {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
   private backgroundTexture?: THREE.CubeTexture;
+  private backdropRoot?: THREE.Group;
+  // Keep disabled for now: the GLB's "volume" node is scaled 28x and may cover the camera.
+  // After optimizing/checking that node on the target device, set this to true to enable the backdrop.
+  private readonly enableDetailedBackdrop = false;
   private readonly backgrounds = [
     { folder: 'hallway', label: 'Pasillo clásico' },
     { folder: 'office', label: 'Oficina moderna' },
@@ -155,6 +159,16 @@ export class BiomboEngineService {
       this.backgroundTexture = await this.loadBackgroundTexture(this.backgrounds[0].folder);
       this.scene.background = this.backgroundTexture;
       this.scene.environment = this.backgroundTexture;
+      if (this.enableDetailedBackdrop) {
+        try {
+          this.backdropRoot = await this.loadBackdropScene();
+          this.scene.add(this.backdropRoot);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : 'Error al cargar el fondo 3D.';
+          this.backgroundError.set(`Fondo 3D desactivado; se conserva el fondo clásico. ${message}`);
+          console.error('Error cargando el fondo 3D:', error);
+        }
+      }
       this.machineRoot = new THREE.Group();
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
@@ -370,6 +384,39 @@ export class BiomboEngineService {
           reject,
         );
     });
+  }
+
+  private async loadBackdropScene(): Promise<THREE.Group> {
+    const gltf = await new GLTFLoader().loadAsync('/assets/posible-background.glb');
+    const root = gltf.scene;
+    root.name = 'biombo-backdrop';
+    root.position.set(0, -6.5, -32);
+    root.rotation.y = Math.PI * 0.08;
+    root.scale.setScalar(2.35);
+
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) {
+        return;
+      }
+      object.castShadow = false;
+      object.receiveShadow = true;
+      if (Array.isArray(object.material)) {
+        object.material = object.material.map((material) => {
+          if (material instanceof THREE.MeshStandardMaterial) {
+            const materialClone = material.clone();
+            materialClone.envMapIntensity = 0.8;
+            return materialClone;
+          }
+          return material;
+        });
+      } else if (object.material instanceof THREE.MeshStandardMaterial) {
+        const materialClone = object.material.clone();
+        materialClone.envMapIntensity = 0.8;
+        object.material = materialClone;
+      }
+    });
+
+    return root;
   }
 
   public setSecondaryConfig(config: BiomboConfig | null): void {
@@ -1797,6 +1844,21 @@ export class BiomboEngineService {
     this.clearQuaternaryTimers();
     this.clearBallEffects();
     if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
+    if (this.backdropRoot) {
+      this.scene?.remove(this.backdropRoot);
+      this.backdropRoot.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) {
+          return;
+        }
+        object.geometry.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => material.dispose());
+        } else if (object.material) {
+          object.material.dispose();
+        }
+      });
+      this.backdropRoot = undefined;
+    }
     this.renderer?.dispose();
     this.backgroundTexture?.dispose();
     this.backgroundTexture = undefined;
