@@ -13,6 +13,7 @@ type BallExitAnimation = {
   targetSlotPos: THREE.Vector3;
   ballNumber: number;
   hasSettled: boolean;
+  onSettled: () => void;
   startRotZ?: number;
   startRotY?: number;
   startRotX?: number;
@@ -274,7 +275,7 @@ export class BiomboEngineService {
       this.buildDrumPivot(hollow);
 
       if (ornaments['tube']) (ornaments['tube'] as THREE.Mesh).material = darkChassisMaterial;
-      if (ornaments['base']) (ornaments['base'] as THREE.Mesh).material = darkChassisMaterial;
+      if (ornaments['base']) ornaments['base'].visible = false;
       if (ornaments['support']) (ornaments['support'] as THREE.Mesh).material = darkChassisMaterial;
       if (ornaments['ring_outer']) (ornaments['ring_outer'] as THREE.Mesh).material = chromeMaterial;
       if (ornaments['ring_inner']) (ornaments['ring_inner'] as THREE.Mesh).material = neonRingMaterial;
@@ -1498,6 +1499,7 @@ export class BiomboEngineService {
           anim.hasSettled = true;
           anim.mesh.position.copy(anim.targetSlotPos);
           anim.mesh.rotation.set(-0.22, -Math.PI / 2, anim.targetRotZ || 0);
+          anim.onSettled();
         }
       }
     }
@@ -1710,11 +1712,20 @@ export class BiomboEngineService {
 
       drawSequence.forEach((ballNumber, index) => {
         const timer = window.setTimeout(() => {
-          const current = [...getExtractedBalls()];
-          current.push(ballNumber);
-          setExtractedBalls(current);
-
-          this.spawnBallExitThroughBottom(ballNumber, index, config, machineRoot, agitationBalls);
+          this.spawnBallExitThroughBottom(
+            ballNumber,
+            index,
+            config,
+            machineRoot,
+            agitationBalls,
+            () => {
+              this.ngZone.run(() => {
+                const current = [...getExtractedBalls()];
+                current.push(ballNumber);
+                setExtractedBalls(current);
+              });
+            },
+          );
 
           if (index === drawSequence.length - 1) {
             const finishTimer = window.setTimeout(() => {
@@ -1738,6 +1749,7 @@ export class BiomboEngineService {
     config: BiomboConfig,
     machineRoot: THREE.Group,
     agitationBalls: THREE.Mesh[],
+    onSettled: () => void,
   ): void {
     const ballRadius = 0.95;
     const mesh = this.createNumberedBallMesh(ballNumber, config, ballRadius);
@@ -1800,6 +1812,7 @@ export class BiomboEngineService {
       targetSlotPos,
       ballNumber,
       hasSettled: false,
+      onSettled,
     });
   }
 

@@ -4,11 +4,12 @@ import { IonButton, IonSpinner } from '@ionic/angular';
 import { BiomboCanvasComponent } from '../biombo-canvas/biombo-canvas.component';
 import { BiomboConfig } from '../../utilities/biombo.interfaces';
 import { BiomboEngineService } from '../../services/biombo-engine.service';
+import { BiomboResultBoard, BiomboResultsComponent } from '../biombo-results/biombo-results.component';
 
 @Component({
   selector: 'app-biombo-card',
   standalone: true,
-  imports: [CommonModule, BiomboCanvasComponent, IonButton, IonSpinner],
+  imports: [CommonModule, BiomboCanvasComponent, BiomboResultsComponent, IonButton, IonSpinner],
   providers: [BiomboEngineService],
   template: `
     <div class="biombo-stage-wrapper">
@@ -61,6 +62,11 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
         <p class="background-error" role="alert">{{ engine.backgroundError() }}</p>
       }
 
+      <app-biombo-results
+        [boards]="resultBoards"
+        [class.multi-board]="resultBoards.length > 1">
+      </app-biombo-results>
+
       <!-- HUD Superior Flotante (Glassmorphism) -->
       <div class="hud-top-bar"
         [class.dual-hud]="!!secondaryConfig"
@@ -109,7 +115,7 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
           class="cyber-action-btn"
           [disabled]="!engine.isReady() || !engine.canStartRound()"
           (click)="engine.play()">
-          {{ engine.isRoundFinished() ? 'NUEVA RONDA' : 'INICIAR SORTEO' }}
+          {{ engine.isRoundFinished() ? 'INICIAR' : 'INICIAR SORTEO' }}
         </ion-button>
       </div>
     </div>
@@ -316,19 +322,18 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
     .hud-bottom-dock {
       position: absolute;
       bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: calc(100% - 32px);
-      max-width: 520px;
+      right: 20px;
+      width: min(calc(26.6667% - 8.53px), 138.67px);
+      min-width: max-content;
       display: flex;
       flex-direction: column;
       gap: 12px;
-      padding: 14px 18px;
+      padding: 11px 5px;
       background: rgba(10, 12, 18, 0.75);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 18px;
+      border-radius: 14px;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
       z-index: 20;
     }
@@ -337,9 +342,10 @@ import { BiomboEngineService } from '../../services/biombo-engine.service';
       --color: #000;
       --border-radius: 10px;
       font-weight: 900;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.2px;
       margin: 0;
-      height: 46px;
+      height: 37px;
+      white-space: nowrap;
     }
     @media (max-width: 520px) {
       .background-control {
@@ -378,5 +384,45 @@ export class BiomboCardComponent {
   @Input() secondaryConfig: BiomboConfig | null = null;
   @Input() tertiaryConfig: BiomboConfig | null = null;
   @Input() quaternaryConfig: BiomboConfig | null = null;
+
+  public get resultBoards(): BiomboResultBoard[] {
+    const boards: BiomboResultBoard[] = [
+      {
+        title: this.config.title,
+        state: this.engine.state(),
+        extracted: this.engine.extractedBalls(),
+        resultCount: this.config.resultCount,
+      },
+    ];
+
+    if (this.secondaryConfig) {
+      boards.push({
+        title: this.secondaryConfig.title,
+        state: this.engine.secondaryState(),
+        extracted: this.engine.secondaryExtractedBalls(),
+        resultCount: this.secondaryConfig.resultCount,
+      });
+    }
+
+    if (this.tertiaryConfig) {
+      boards.push({
+        title: this.tertiaryConfig.title,
+        state: this.engine.tertiaryState(),
+        extracted: this.engine.tertiaryExtractedBalls(),
+        resultCount: this.tertiaryConfig.resultCount,
+      });
+    }
+
+    if (this.quaternaryConfig) {
+      boards.push({
+        title: this.quaternaryConfig.title,
+        state: this.engine.quaternaryState(),
+        extracted: this.engine.quaternaryExtractedBalls(),
+        resultCount: this.quaternaryConfig.resultCount,
+      });
+    }
+
+    return boards;
+  }
   public readonly engine: BiomboEngineService = inject(BiomboEngineService);
 }
