@@ -769,6 +769,7 @@ export class BiomboEngineService {
       if (object.name !== 'Base' && object.name !== 'Back Wall') {
         return;
       }
+      const partColor = object.name === 'Back Wall' ? 0xf4f4f0 : color;
       object.traverse((part) => {
         if (!(part instanceof THREE.Mesh)) {
           return;
@@ -776,7 +777,7 @@ export class BiomboEngineService {
         const applyColor = (material: THREE.Material): THREE.Material => {
           const coloredMaterial = material.clone();
           if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
-            coloredMaterial.color.setHex(color);
+            coloredMaterial.color.setHex(partColor);
           }
           return coloredMaterial;
         };
@@ -907,6 +908,7 @@ export class BiomboEngineService {
     const startX = -chuteWidth / 2;
     const stepX = chuteWidth / (numChutes - 1);
     const ballRadius = ballStates[0]?.radius || 0.92;
+    const chuteDepth = -ballRadius * 1.5;
     const rowSpacing = ballRadius * 2.1;
 
     for (let index = 0; index < balls.length; index++) {
@@ -917,7 +919,7 @@ export class BiomboEngineService {
       const x = startX + col * stepX;
       // Altura en los rieles verticales superiores
       const y = 11.2 + row * rowSpacing;
-      const z = 0.0;
+      const z = chuteDepth;
 
       const targetPos = machineRoot.localToWorld(new THREE.Vector3(x, y, z));
       if (ballGroup) {
