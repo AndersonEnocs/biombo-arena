@@ -67,9 +67,8 @@ export class BiomboEngineService {
   private renderer!: THREE.WebGLRenderer;
   private backgroundTexture?: THREE.CubeTexture;
   private backdropRoot?: THREE.Group;
-  // Keep disabled for now: the GLB's "volume" node is scaled 28x and may cover the camera.
-  // After optimizing/checking that node on the target device, set this to true to enable the backdrop.
-  private readonly enableDetailedBackdrop = false;
+  private stagePodium?: THREE.Group;
+  private readonly enableDetailedBackdrop = true;
   private readonly backgrounds = [
     { folder: 'hallway', label: 'Pasillo clásico' },
     { folder: 'office', label: 'Oficina moderna' },
@@ -315,7 +314,6 @@ export class BiomboEngineService {
 
       this.buildInternalMechanism();
 
-      // ⭐ Estacionamiento inicial en los rieles superiores (Back Wall)
       this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
 
       if (secondaryConfig) {
@@ -361,6 +359,25 @@ export class BiomboEngineService {
       this.backgroundTexture = texture;
       this.scene.background = texture;
       this.scene.environment = texture;
+
+      if (this.backdropRoot) {
+        this.backdropRoot.traverse((obj) => {
+          if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+            obj.material.envMap = texture ?? null;
+            obj.material.needsUpdate = true;
+          }
+        });
+      }
+
+      if (this.stagePodium) {
+        this.stagePodium.traverse((obj) => {
+          if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+            obj.material.envMap = texture ?? null;
+            obj.material.needsUpdate = true;
+          }
+        });
+      }
+
       this.currentBackgroundIndex = nextIndex;
       this.backgroundName.set(nextBackground.label);
       previousTexture?.dispose();
@@ -389,35 +406,131 @@ export class BiomboEngineService {
     });
   }
 
+  // ⭐ ESCENARIO 3D ARQUITECTÓNICO OPTIMIZADO
   private async loadBackdropScene(): Promise<THREE.Group> {
     const gltf = await new GLTFLoader().loadAsync('/assets/posible-background.glb');
     const root = gltf.scene;
     root.name = 'biombo-backdrop';
-    root.position.set(0, -6.5, -32);
-    root.rotation.y = Math.PI * 0.08;
-    root.scale.setScalar(2.35);
+
+    root.position.set(0, -19.2, -4.0);
+    root.rotation.set(0, 0, 0);
+    root.scale.set(3.2, 2.35, 3.2);
+
+    const floorMeshes: THREE.Mesh[] = [];
+    const columnCandidates: THREE.Object3D[] = [];
 
     root.traverse((object) => {
+      if (object.name.toLowerCase() === 'volume') {
+        object.visible = false;
+        return;
+      }
       if (!(object instanceof THREE.Mesh)) {
         return;
       }
+
       object.castShadow = false;
       object.receiveShadow = true;
-      if (Array.isArray(object.material)) {
-        object.material = object.material.map((material) => {
-          if (material instanceof THREE.MeshStandardMaterial) {
-            const materialClone = material.clone();
-            materialClone.envMapIntensity = 0.8;
-            return materialClone;
-          }
-          return material;
-        });
-      } else if (object.material instanceof THREE.MeshStandardMaterial) {
-        const materialClone = object.material.clone();
-        materialClone.envMapIntensity = 0.8;
-        object.material = materialClone;
+
+      const enhanceMaterial = (mat: THREE.Material): THREE.Material => {
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          const clone = mat.clone();
+          clone.envMap = this.backgroundTexture ?? null;
+          clone.envMapIntensity = 0.95;
+          clone.roughness = Math.min(0.45, Math.max(0.18, clone.roughness * 0.85));
+          clone.metalness = Math.min(0.35, clone.metalness);
+          return clone;
+        }
+        return mat;
+      };
+
+      object.material = Array.isArray(object.material)
+        ? object.material.map(enhanceMaterial)
+        : enhanceMaterial(object.material);
+
+      object.geometry.computeBoundingBox();
+      const bbox = object.geometry.boundingBox;
+      if (bbox) {
+        const size = bbox.getSize(new THREE.Vector3());
+        if (size.y < 3.0 && (size.x > 8.0 || size.z > 8.0)) {
+          floorMeshes.push(object);
+        }
       }
     });
+
+    const mainFloor = floorMeshes[0];
+    if (mainFloor) {
+      mainFloor.name = 'backdrop-main-floor';
+    }
+
+    root.updateMatrixWorld(true);
+    root.children.forEach((child) => {
+      if (child === mainFloor || child.name.toLowerCase() === 'volume') {
+        return;
+      }
+      const childBox = new THREE.Box3().setFromObject(child);
+      const childSize = childBox.getSize(new THREE.Vector3());
+      const childCenter = childBox.getCenter(new THREE.Vector3());
+
+      if (childSize.y > 3.0) {
+        columnCandidates.push(child);
+        if (childCenter.x < -0.1) {
+          child.position.x -= 4.3;
+        } else if (childCenter.x > 0.1) {
+          child.position.x += 4.3;
+        }
+      }
+    });
+
+    if (columnCandidates.length === 0) {
+      root.traverse((object) => {
+        if (object === mainFloor || object.name.toLowerCase() === 'volume' || !(object instanceof THREE.Mesh)) {
+          return;
+        }
+        const box = new THREE.Box3().setFromObject(object);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        if (size.y > 3.0) {
+          if (center.x < -0.1) {
+            object.position.x -= 4.3;
+          } else if (center.x > 0.1) {
+            object.position.x += 4.3;
+          }
+        }
+      });
+    }
+
+    if (mainFloor) {
+      mainFloor.scale.set(4.5, 1.0, 4.5);
+      const floorMat = mainFloor.material;
+      const mat = Array.isArray(floorMat) ? floorMat[0] : floorMat;
+
+      if (mat && 'map' in mat) {
+        const matWithMap = mat as THREE.MeshStandardMaterial;
+        if (matWithMap.map) {
+          matWithMap.map.wrapS = THREE.RepeatWrapping;
+          matWithMap.map.wrapT = THREE.RepeatWrapping;
+          matWithMap.map.repeat.set(
+            (matWithMap.map.repeat.x || 1) * 4.5,
+            (matWithMap.map.repeat.y || 1) * 4.5,
+          );
+          matWithMap.map.needsUpdate = true;
+        }
+      }
+    }
+
+    const groundGeo = new THREE.PlaneGeometry(600, 600);
+    groundGeo.rotateX(-Math.PI / 2);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x1e2024,
+      roughness: 0.32,
+      metalness: 0.15,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.85,
+    });
+    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh.position.y = -0.06;
+    groundMesh.receiveShadow = true;
+    root.add(groundMesh);
 
     return root;
   }
@@ -793,24 +906,29 @@ export class BiomboEngineService {
       return;
     }
 
+    const portrait = width < height;
+
     if (this.quaternaryRig) {
-      const portrait = width < height;
       const scale = portrait ? 0.26 : 0.3;
-      const horizontalSeparation = portrait ? 8 : 10;
-      const frontHorizontalSeparation = portrait ? 10 : 14;
-      const verticalSeparation = portrait ? 10 : 7;
+      const horizontalSeparation = portrait ? 8.5 : 10.5;
+      const frontHorizontalSeparation = portrait ? 10.5 : 14.5;
+      const verticalSeparation = portrait ? 5.5 : 4.0;
       const depthSeparation = portrait ? 9 : 12;
+
       this.machineRoot.scale.setScalar(scale);
       this.machineRoot.position.set(-horizontalSeparation, verticalSeparation, -depthSeparation);
+
       this.secondaryRig?.root.scale.setScalar(scale);
       this.secondaryRig?.root.position.set(horizontalSeparation, verticalSeparation, -depthSeparation);
+
       this.tertiaryRig?.root.scale.setScalar(scale);
       this.tertiaryRig?.root.position.set(-frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+
       this.quaternaryRig.root.scale.setScalar(scale);
       this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+
       this.baseCameraPosition.set(0, 0, portrait ? 76 : 68);
     } else if (this.tertiaryRig) {
-      const portrait = width < height;
       const scale = portrait ? 0.34 : 0.42;
       const separation = portrait ? 15.5 : 17.5;
       this.machineRoot.scale.setScalar(scale);
@@ -821,7 +939,6 @@ export class BiomboEngineService {
       this.tertiaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
       this.baseCameraPosition.set(0, 0, portrait ? 70 : 64);
     } else if (this.secondaryRig) {
-      const portrait = width < height;
       const scale = portrait ? 0.42 : 0.58;
 
       const biombo1_X = portrait ? 0 : -13.5;
@@ -850,16 +967,144 @@ export class BiomboEngineService {
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
 
-    for (const root of [
+    const activeRoots = [
       this.machineRoot,
       this.secondaryRig?.root,
       this.tertiaryRig?.root,
       this.quaternaryRig?.root,
-    ]) {
-      if (root) {
-        this.alignLotteryTableToBiombo(root);
+    ].filter((r): r is THREE.Group => !!r);
+
+    for (const root of activeRoots) {
+      this.alignLotteryTableToBiombo(root);
+      root.updateMatrixWorld(true);
+    }
+
+    // ⭐ CONTACTO Y APOYO REAL: Detección dinámica de la cota mínima de las bases
+    let lowestBaseY = Infinity;
+    for (const r of activeRoots) {
+      const table = r.getObjectByName('biombo-table-asset') || r;
+      table.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(table);
+      if (box.min.y < lowestBaseY) {
+        lowestBaseY = box.min.y;
       }
     }
+
+    if (this.backdropRoot) {
+      this.backdropRoot.updateWorldMatrix(true, true);
+      const floorObj = this.backdropRoot.getObjectByName('backdrop-main-floor') || this.backdropRoot;
+      const floorBox = new THREE.Box3().setFromObject(floorObj);
+      const currentFloorTop = floorBox.max.y;
+
+      if (Number.isFinite(lowestBaseY) && Number.isFinite(currentFloorTop)) {
+        const adjustment = (lowestBaseY - currentFloorTop) - 0.02;
+        this.backdropRoot.position.y += adjustment;
+      } else {
+        this.backdropRoot.position.y = lowestBaseY !== Infinity ? lowestBaseY - 0.02 : -19.22;
+      }
+      this.backdropRoot.updateWorldMatrix(true, true);
+    }
+
+    // ⭐ ESTRADO ARQUITECTÓNICO DEL SEGUNDO NIVEL PARA BIOMBOS CUÁDRUPLES
+    if (this.quaternaryRig && this.tertiaryRig && this.secondaryRig) {
+      const frontRoots = [this.tertiaryRig.root, this.quaternaryRig.root];
+      const backRoots = [this.machineRoot, this.secondaryRig.root];
+
+      let frontBaseY = Infinity;
+      for (const r of frontRoots) {
+        const table = r.getObjectByName('biombo-table-asset') || r;
+        table.updateWorldMatrix(true, true);
+        const box = new THREE.Box3().setFromObject(table);
+        if (box.min.y < frontBaseY) frontBaseY = box.min.y;
+      }
+
+      let backBaseY = Infinity;
+      for (const r of backRoots) {
+        const table = r.getObjectByName('biombo-table-asset') || r;
+        table.updateWorldMatrix(true, true);
+        const box = new THREE.Box3().setFromObject(table);
+        if (box.min.y < backBaseY) backBaseY = box.min.y;
+      }
+
+      if (Number.isFinite(frontBaseY) && Number.isFinite(backBaseY) && backBaseY > frontBaseY) {
+        const podiumHeight = backBaseY - frontBaseY;
+        const depthSeparation = portrait ? 9 : 12;
+        this.updateStagePodium(frontBaseY, podiumHeight, depthSeparation);
+      }
+    } else {
+      if (this.stagePodium) {
+        this.stagePodium.visible = false;
+      }
+    }
+  }
+
+  // ⭐ CONSTRUCCIÓN DEL ESTRADO/TARIMA PARA EL GRADERÍO TRASERO
+  private updateStagePodium(frontBaseY: number, podiumHeight: number, depthSeparation: number): void {
+    if (!this.stagePodium) {
+      this.stagePodium = new THREE.Group();
+      this.stagePodium.name = 'stage-tiered-podium';
+      this.scene.add(this.stagePodium);
+    }
+
+    while (this.stagePodium.children.length > 0) {
+      const child = this.stagePodium.children[0];
+      this.stagePodium.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+      }
+    }
+
+    const podiumWidth = 38;
+    const podiumDepth = 24;
+    const centerY = frontBaseY + podiumHeight / 2;
+    const centerZ = -depthSeparation;
+
+    const stoneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x222429,
+      roughness: 0.32,
+      metalness: 0.22,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.85,
+    });
+
+    const goldMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd4af37,
+      roughness: 0.18,
+      metalness: 0.88,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.1,
+    });
+
+    // 1. Bloque base del estrado
+    const baseGeo = new THREE.BoxGeometry(podiumWidth, podiumHeight, podiumDepth);
+    const baseMesh = new THREE.Mesh(baseGeo, stoneMaterial);
+    baseMesh.position.set(0, centerY, centerZ);
+    baseMesh.receiveShadow = true;
+    baseMesh.castShadow = true;
+    this.stagePodium.add(baseMesh);
+
+    // 2. Cornisa superior biselada
+    const topCapHeight = 0.35;
+    const capGeo = new THREE.BoxGeometry(podiumWidth + 0.8, topCapHeight, podiumDepth + 0.8);
+    const capMesh = new THREE.Mesh(capGeo, stoneMaterial);
+    capMesh.position.set(0, frontBaseY + podiumHeight - topCapHeight / 2, centerZ);
+    capMesh.receiveShadow = true;
+    capMesh.castShadow = true;
+    this.stagePodium.add(capMesh);
+
+    // 3. Moldura dorada decorativa en el borde frontal (acabado palaciego)
+    const trimHeight = 0.12;
+    const trimGeo = new THREE.BoxGeometry(podiumWidth + 0.9, trimHeight, 0.1);
+    const trimMesh = new THREE.Mesh(trimGeo, goldMaterial);
+    trimMesh.position.set(
+      0,
+      frontBaseY + podiumHeight - topCapHeight,
+      centerZ + (podiumDepth + 0.8) / 2,
+    );
+    trimMesh.castShadow = true;
+    this.stagePodium.add(trimMesh);
+
+    this.stagePodium.visible = true;
   }
 
   private alignLotteryTableToBiombo(root: THREE.Group): void {
@@ -917,7 +1162,6 @@ export class BiomboEngineService {
       const row = Math.floor(index / numChutes);
 
       const x = startX + col * stepX;
-      // Altura en los rieles verticales superiores
       const y = 11.2 + row * rowSpacing;
       const z = chuteDepth;
 
@@ -943,7 +1187,6 @@ export class BiomboEngineService {
     ballStates.forEach((ballState, index) => {
       const col = index % numChutes;
       const row = Math.floor(index / numChutes);
-      // Las bolas de abajo caen primero, con leve desfase por columna
       const delay = row * 0.16 + (col % 2 === 0 ? 0.04 : 0.1) + Math.random() * 0.05;
       ballState.isDropping = true;
       ballState.dropDelay = delay;
@@ -1249,21 +1492,18 @@ export class BiomboEngineService {
       const ball = ballState.mesh;
       const velocity = ballState.velocity;
 
-      // ⭐ FASE DE DESCENSO DESDE LOS RIELES SUPERIORES
       if (ballState.isDropping) {
         if (ballState.dropDelay && ballState.dropDelay > 0) {
           ballState.dropDelay -= deltaSeconds;
           return;
         }
 
-        // Aceleración gravitacional directa hacia el interior del biombo
         velocity.y -= 75.0 * deltaSeconds;
         velocity.x += -ball.position.x * 2.2 * deltaSeconds;
         velocity.z += -ball.position.z * 2.2 * deltaSeconds;
 
         ball.position.addScaledVector(velocity, deltaSeconds);
 
-        // Cuando la bola ingresa por la parte superior del cristal (Y < 7.0), entra a la física de colisión
         if (ball.position.y < 7.0) {
           ballState.isDropping = false;
         }
@@ -1381,7 +1621,6 @@ export class BiomboEngineService {
       : Math.min((now - this.lastAgitationFrame) / 1000, 1 / 30);
     this.lastAgitationFrame = now;
 
-    // 1. Cinemática y físicas independientes por biombo
     const alphaSpeed = this.stepRigMechanics(
       this.state(),
       this.drumGroup,
@@ -1448,7 +1687,6 @@ export class BiomboEngineService {
       );
     }
 
-    // 2. Animación de rodamiento y frenado en rampas
     for (let index = 0; index < this.ballEffects.length; index++) {
       const anim = this.ballEffects[index];
       const elapsed = (now - anim.startAt) / 1000;
@@ -1506,7 +1744,6 @@ export class BiomboEngineService {
       }
     }
 
-    // 3. Two-stage cinematic framing: zoom in for the shuffle, then focus on the ball exit.
     let targetCamPos: THREE.Vector3;
     let targetCamLook: THREE.Vector3;
 
@@ -1705,7 +1942,6 @@ export class BiomboEngineService {
   ): void {
     const drawSequence = generateBiomboResults(config);
 
-    // ⭐ Disparo de caída natural de las bolas desde los rieles superiores
     const rigStates = this.getRigBallStates(machineRoot);
     this.triggerBallDrop(rigStates);
 
@@ -1893,6 +2129,20 @@ export class BiomboEngineService {
       });
       this.backdropRoot = undefined;
     }
+    if (this.stagePodium) {
+      this.scene?.remove(this.stagePodium);
+      this.stagePodium.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          if (Array.isArray(object.material)) {
+            object.material.forEach((m) => m.dispose());
+          } else if (object.material) {
+            object.material.dispose();
+          }
+        }
+      });
+      this.stagePodium = undefined;
+    }
     this.renderer?.dispose();
     this.backgroundTexture?.dispose();
     this.backgroundTexture = undefined;
@@ -1944,7 +2194,6 @@ export class BiomboEngineService {
     }
     this.ballEffects = remainingEffects;
 
-    // Restaurar bolas a sus rieles verticales superiores
     this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
     if (this.secondaryRig) {
       this.stageBallsInChutes(
