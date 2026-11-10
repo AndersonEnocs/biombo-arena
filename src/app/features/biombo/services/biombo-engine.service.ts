@@ -161,6 +161,7 @@ export class BiomboEngineService {
       this.backgroundTexture = await this.loadBackgroundTexture(this.backgrounds[0].folder);
       this.scene.background = this.backgroundTexture;
       this.scene.environment = this.backgroundTexture;
+
       if (this.enableDetailedBackdrop) {
         try {
           this.backdropRoot = await this.loadBackdropScene();
@@ -171,6 +172,7 @@ export class BiomboEngineService {
           console.error('Error cargando el fondo 3D:', error);
         }
       }
+
       this.machineRoot = new THREE.Group();
       this.machineRoot.name = 'biombo-machine-alpha';
       this.scene.add(this.machineRoot);
@@ -205,13 +207,17 @@ export class BiomboEngineService {
 
       container.replaceChildren(this.renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
       this.scene.add(ambientLight);
 
       const mainLight = new THREE.DirectionalLight(0xffffff, 1.9);
       mainLight.position.set(15, 30, 25);
       mainLight.castShadow = true;
       this.scene.add(mainLight);
+
+      const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.95);
+      frontFillLight.position.set(0, 10, 40);
+      this.scene.add(frontFillLight);
 
       const rimLightLeft = new THREE.PointLight(0x70a0ff, 18, 80);
       rimLightLeft.position.set(-25, 10, 10);
@@ -232,63 +238,29 @@ export class BiomboEngineService {
         clearcoatRoughness: 0.0,
         side: THREE.FrontSide,
         depthWrite: false,
-      });
-
-      const darkChassisMaterial = new THREE.MeshStandardMaterial({
-        color: 0x15181f,
-        metalness: 0.85,
-        roughness: 0.35,
-      });
-
-      const chromeMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        metalness: 0.95,
-        roughness: 0.1,
-      });
-
-      const neonRingMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xffffff,
-        emissiveIntensity: 3.5,
-        roughness: 0.2,
+        envMap: this.backgroundTexture ?? null,
+        envMapIntensity: 0.85,
       });
 
       const rampMaterial = new THREE.MeshStandardMaterial({
         color: 0x111317,
         metalness: 0.75,
         roughness: 0.35,
+        envMap: this.backgroundTexture ?? null,
       });
 
-      const [hollow, ornaments, ramp, lotteryModel] = await Promise.all([
+      const [hollow, ramp, lotteryModel] = await Promise.all([
         new SolidEntity(rapier, glassMaterial).load('/assets/hollow_sphere.fbx'),
-        new SolidEntity(rapier).load('/assets/ornaments.fbx'),
         new SolidEntity(rapier, rampMaterial).load('/assets/ramp.fbx'),
         new GLTFLoader().loadAsync('/assets/loteria.glb'),
       ]);
 
       this.solids['hollow'] = hollow;
-      this.solids['ornaments'] = ornaments;
       this.solids['ramp'] = ramp;
 
       hollow.center(0);
       this.buildDrumPivot(hollow);
 
-      if (ornaments['tube']) (ornaments['tube'] as THREE.Mesh).material = darkChassisMaterial;
-      if (ornaments['base']) ornaments['base'].visible = false;
-      if (ornaments['support']) (ornaments['support'] as THREE.Mesh).material = darkChassisMaterial;
-      if (ornaments['ring_outer']) (ornaments['ring_outer'] as THREE.Mesh).material = chromeMaterial;
-      if (ornaments['ring_inner']) (ornaments['ring_inner'] as THREE.Mesh).material = neonRingMaterial;
-
-      if (ornaments['glass_hole']) {
-        (ornaments['glass_hole'] as THREE.Mesh).material = glassMaterial;
-        (ornaments['glass_hole'] as THREE.Mesh).visible = false;
-      }
-
-      if (ornaments['table']) {
-        ornaments['table'].visible = false;
-      }
-
-      ornaments.meshes.forEach((mesh) => this.machineRoot.add(mesh));
       ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
 
       this.lotteryTableTemplates.clear();
@@ -312,7 +284,7 @@ export class BiomboEngineService {
       this.machineRoot.add(this.createLotteryTable(0xf4f4f0));
       this.alignLotteryTable(this.machineRoot);
 
-      this.buildInternalMechanism();
+      this.buildInternalMechanismFromGLTF(lotteryModel.scene);
 
       this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
 
@@ -335,6 +307,185 @@ export class BiomboEngineService {
       this.errorMessage.set(message);
       throw new Error(message);
     }
+  }
+
+  private createLotteryTable(color: number): THREE.Group {
+    const table = new THREE.Group();
+    table.name = 'biombo-table-asset';
+    const scale = 0.92 / 0.079;
+    table.rotation.y = Math.PI / 2;
+    table.scale.setScalar(scale);
+
+    const backWallMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf4f4f0,
+      roughness: 0.32,
+      metalness: 0.1,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.8,
+    });
+
+    const chuteRailsMaterial = new THREE.MeshStandardMaterial({
+      color: 0x353a44,
+      metalness: 0.85,
+      roughness: 0.25,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.9,
+    });
+
+    const chuteGlassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.18,
+      roughness: 0.02,
+      metalness: 0.0,
+      clearcoat: 1.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.75,
+    });
+
+    for (const name of ['Base', 'Back Wall', 'Back Panel', 'Ball Holder', 'Ball Holder Glass']) {
+      const template = this.lotteryTableTemplates.get(name);
+      if (!template) {
+        continue;
+      }
+      const part = template.clone(true);
+      part.name = name;
+      part.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) {
+          return;
+        }
+
+        object.castShadow = true;
+        object.receiveShadow = true;
+
+        if (name === 'Back Wall') {
+          object.material = backWallMaterial.clone();
+        } else if (name === 'Ball Holder') {
+          object.material = chuteRailsMaterial.clone();
+        } else if (name === 'Ball Holder Glass') {
+          object.material = chuteGlassMaterial.clone();
+        } else if (name === 'Base') {
+          object.material = new THREE.MeshStandardMaterial({
+            color,
+            metalness: 0.45,
+            roughness: 0.4,
+            envMap: this.backgroundTexture ?? null,
+            envMapIntensity: 0.8,
+          });
+        } else {
+          object.material = Array.isArray(object.material)
+            ? object.material.map((mat) => mat.clone())
+            : object.material.clone();
+        }
+      });
+      table.add(part);
+    }
+
+    this.setLotteryTableColor(table, color);
+    return table;
+  }
+
+  private buildInternalMechanismFromGLTF(lotteryScene: THREE.Group): void {
+    const hollowMesh = this.solids['hollow']?.mesh;
+    if (!hollowMesh) {
+      return;
+    }
+    hollowMesh.renderOrder = 10;
+
+    const mechanism = new THREE.Group();
+    mechanism.name = 'internal-mechanism';
+    mechanism.position.set(0, 0, 0);
+    mechanism.renderOrder = 2;
+
+    const agitatorAssembly = new THREE.Group();
+    agitatorAssembly.name = 'agitator-assembly';
+
+    const scale = 0.92 / 0.079;
+
+    const neonRingMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00f0ff,
+      emissive: 0x00d2ff,
+      emissiveIntensity: 3.5,
+      roughness: 0.2,
+      metalness: 0.1,
+    });
+
+    const paddleMaterial = new THREE.MeshStandardMaterial({
+      color: 0x62b846,
+      emissive: 0x1d4715,
+      emissiveIntensity: 0.35,
+      metalness: 0.85,
+      roughness: 0.22,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.0,
+    });
+
+    const chromeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      metalness: 0.96,
+      roughness: 0.12,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.2,
+    });
+
+    const paddleTemplate = lotteryScene.getObjectByName('Paddle');
+    const paddleRingTemplate = lotteryScene.getObjectByName('Paddle_Ring') || lotteryScene.getObjectByName('Circle002');
+    const paddleAxleTemplate = lotteryScene.getObjectByName('Paddle_Axle');
+    const paddleEndTemplate = lotteryScene.getObjectByName('Paddle_end');
+
+    const centerOffset = new THREE.Vector3(0.02, 3.03, 0.0);
+
+    const parts = [
+      { tmpl: paddleTemplate, mat: paddleMaterial },
+      { tmpl: paddleRingTemplate, mat: neonRingMaterial },
+      { tmpl: paddleAxleTemplate, mat: chromeMaterial },
+      { tmpl: paddleEndTemplate, mat: chromeMaterial },
+    ];
+
+    parts.forEach(({ tmpl, mat }) => {
+      if (!tmpl) return;
+      const clone = tmpl.clone(true);
+      clone.position.sub(centerOffset);
+      clone.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.material = mat;
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+      agitatorAssembly.add(clone);
+    });
+
+    agitatorAssembly.scale.setScalar(scale);
+    agitatorAssembly.rotation.y = Math.PI / 2;
+    mechanism.add(agitatorAssembly);
+
+    hollowMesh.add(mechanism);
+    this.mechanismGroup = mechanism;
+
+    const collectorTemplate = lotteryScene.getObjectByName('Collector');
+    if (collectorTemplate) {
+      const collectorClone = collectorTemplate.clone(true);
+      collectorClone.scale.setScalar(scale);
+      collectorClone.rotation.y = Math.PI / 2;
+      collectorClone.position.set(0, -8.2, 0);
+      collectorClone.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.material = chromeMaterial;
+        }
+      });
+      this.machineRoot.add(collectorClone);
+    }
+
+    const ballGroup = new THREE.Group();
+    ballGroup.name = 'internal-ball-group';
+    ballGroup.renderOrder = 3;
+    hollowMesh.add(ballGroup);
+    this.ballGroup = ballGroup;
+
+    this.buildAgitationBalls();
   }
 
   public async changeBackground(direction: -1 | 1): Promise<void> {
@@ -406,13 +557,12 @@ export class BiomboEngineService {
     });
   }
 
-  // ⭐ ESCENARIO 3D ARQUITECTÓNICO OPTIMIZADO
   private async loadBackdropScene(): Promise<THREE.Group> {
     const gltf = await new GLTFLoader().loadAsync('/assets/posible-background.glb');
     const root = gltf.scene;
     root.name = 'biombo-backdrop';
 
-    root.position.set(0, -19.2, -4.0);
+    root.position.set(0, -25.6, -4.0);
     root.rotation.set(0, 0, 0);
     root.scale.set(3.2, 2.35, 3.2);
 
@@ -574,6 +724,7 @@ export class BiomboEngineService {
     root.name = 'biombo-machine-beta';
     this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x17191f);
+
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
       if (object.userData['isDrawnBall']) {
@@ -669,6 +820,7 @@ export class BiomboEngineService {
     root.name = 'biombo-machine-gamma';
     this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0xc62828);
+
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
       if (object.userData['isDrawnBall']) {
@@ -764,6 +916,7 @@ export class BiomboEngineService {
     root.name = 'biombo-machine-delta';
     this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x1565c0);
+
     const drawnBalls: THREE.Object3D[] = [];
     root.traverse((object) => {
       if (object.userData['isDrawnBall']) {
@@ -820,37 +973,6 @@ export class BiomboEngineService {
     this.quaternaryExtractedBalls.set([]);
   }
 
-  private createLotteryTable(color: number): THREE.Group {
-    const table = new THREE.Group();
-    table.name = 'biombo-table-asset';
-    const scale = 0.92 / 0.079;
-    table.rotation.y = Math.PI / 2;
-    table.scale.setScalar(scale);
-
-    for (const name of ['Base', 'Back Wall', 'Back Panel', 'Ball Holder', 'Ball Holder Glass']) {
-      const template = this.lotteryTableTemplates.get(name);
-      if (!template) {
-        continue;
-      }
-      const part = template.clone(true);
-      part.name = name;
-      part.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) {
-          return;
-        }
-        object.material = Array.isArray(object.material)
-          ? object.material.map((mat) => mat.clone())
-          : object.material.clone();
-        object.castShadow = true;
-        object.receiveShadow = true;
-      });
-      table.add(part);
-    }
-
-    this.setLotteryTableColor(table, color);
-    return table;
-  }
-
   private alignLotteryTable(root: THREE.Group): void {
     const table = root.getObjectByName('biombo-table-asset');
     const machineAnchor = root.getObjectByName('sphere-rotation-pivot');
@@ -869,6 +991,35 @@ export class BiomboEngineService {
     const targetCenter = machineCenter.add(new THREE.Vector3(0, 0, -10.8));
 
     table.position.add(targetCenter.sub(tableCenter));
+    root.updateWorldMatrix(true, true);
+  }
+
+  private alignLotteryTableToBiombo(root: THREE.Group): void {
+    const table = root.getObjectByName('biombo-table-asset');
+    const machineAnchor = root.getObjectByName('sphere-rotation-pivot');
+    const tableAnchor = table?.getObjectByName('Circle005')
+      || table?.getObjectByName('Circle005_1')
+      || table?.getObjectByName('Back Panel');
+
+    if (!table || !machineAnchor || !tableAnchor) {
+      throw new Error('Error al centrar la mesa con el biombo.');
+    }
+
+    root.updateWorldMatrix(true, true);
+    const tableCenterWorld = new THREE.Box3()
+      .setFromObject(tableAnchor)
+      .getCenter(new THREE.Vector3());
+    const machineCenterScreen = machineAnchor.getWorldPosition(new THREE.Vector3()).project(this.camera);
+    const tableCenterScreen = tableCenterWorld.clone().project(this.camera);
+    const targetCenterWorld = new THREE.Vector3(
+      machineCenterScreen.x,
+      machineCenterScreen.y,
+      tableCenterScreen.z,
+    ).unproject(this.camera);
+    const currentCenterRoot = root.worldToLocal(tableCenterWorld);
+    const targetCenterRoot = root.worldToLocal(targetCenterWorld);
+
+    table.position.add(targetCenterRoot.sub(currentCenterRoot));
     root.updateWorldMatrix(true, true);
   }
 
@@ -907,6 +1058,9 @@ export class BiomboEngineService {
     }
 
     const portrait = width < height;
+    const biomboElevation = 1.2;
+    const floorClearance = 26.8;
+    let targetFloorY = -floorClearance;
 
     if (this.quaternaryRig) {
       const scale = portrait ? 0.26 : 0.3;
@@ -916,36 +1070,40 @@ export class BiomboEngineService {
       const depthSeparation = portrait ? 9 : 12;
 
       this.machineRoot.scale.setScalar(scale);
-      this.machineRoot.position.set(-horizontalSeparation, verticalSeparation, -depthSeparation);
+      this.machineRoot.position.set(-horizontalSeparation, verticalSeparation + biomboElevation, -depthSeparation);
 
       this.secondaryRig?.root.scale.setScalar(scale);
-      this.secondaryRig?.root.position.set(horizontalSeparation, verticalSeparation, -depthSeparation);
+      this.secondaryRig?.root.position.set(horizontalSeparation, verticalSeparation + biomboElevation, -depthSeparation);
 
       this.tertiaryRig?.root.scale.setScalar(scale);
-      this.tertiaryRig?.root.position.set(-frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+      this.tertiaryRig?.root.position.set(-frontHorizontalSeparation, -verticalSeparation + biomboElevation, depthSeparation);
 
       this.quaternaryRig.root.scale.setScalar(scale);
-      this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation, depthSeparation);
+      this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation + biomboElevation, depthSeparation);
 
       this.baseCameraPosition.set(0, 0, portrait ? 76 : 68);
+      targetFloorY = -verticalSeparation + biomboElevation - floorClearance * scale;
     } else if (this.tertiaryRig) {
       const scale = portrait ? 0.34 : 0.42;
       const separation = portrait ? 15.5 : 17.5;
       this.machineRoot.scale.setScalar(scale);
-      this.machineRoot.position.set(portrait ? 0 : -separation, portrait ? separation : 0, 0);
+      this.machineRoot.position.set(portrait ? 0 : -separation, (portrait ? separation : 0) + biomboElevation, 0);
       this.secondaryRig?.root.scale.setScalar(scale);
-      this.secondaryRig?.root.position.set(0, 0, 0);
+      this.secondaryRig?.root.position.set(0, biomboElevation, 0);
       this.tertiaryRig.root.scale.setScalar(scale);
-      this.tertiaryRig.root.position.set(portrait ? 0 : separation, portrait ? -separation : 0, 0);
+      this.tertiaryRig.root.position.set(portrait ? 0 : separation, (portrait ? -separation : 0) + biomboElevation, 0);
       this.baseCameraPosition.set(0, 0, portrait ? 70 : 64);
+
+      const lowestY = (portrait ? -separation : 0) + biomboElevation;
+      targetFloorY = lowestY - floorClearance * scale;
     } else if (this.secondaryRig) {
       const scale = portrait ? 0.42 : 0.58;
 
       const biombo1_X = portrait ? 0 : -13.5;
-      const biombo1_Y = portrait ? 12.0 : 0.0;
+      const biombo1_Y = (portrait ? 12.0 : 0.0) + biomboElevation;
 
       const biombo2_X = portrait ? 0 : 13.5;
-      const biombo2_Y = portrait ? -12.0 : 0.0;
+      const biombo2_Y = (portrait ? -12.0 : 0.0) + biomboElevation;
 
       this.machineRoot.scale.setScalar(scale);
       this.machineRoot.position.set(biombo1_X, biombo1_Y, 0);
@@ -954,10 +1112,14 @@ export class BiomboEngineService {
       this.secondaryRig.root.position.set(biombo2_X, biombo2_Y, 0);
 
       this.baseCameraPosition.set(0, 0, portrait ? 67 : 61);
+
+      const lowestY = (portrait ? -12.0 : 0.0) + biomboElevation;
+      targetFloorY = lowestY - floorClearance * scale;
     } else {
       this.machineRoot.scale.setScalar(1);
-      this.machineRoot.position.set(0, 0, 0);
+      this.machineRoot.position.set(0, biomboElevation, 0);
       this.baseCameraPosition.set(0, 0, 110.88);
+      targetFloorY = biomboElevation - floorClearance;
     }
 
     this.baseCameraTarget.set(0, 0, 0);
@@ -979,58 +1141,21 @@ export class BiomboEngineService {
       root.updateMatrixWorld(true);
     }
 
-    // ⭐ CONTACTO Y APOYO REAL: Detección dinámica de la cota mínima de las bases
-    let lowestBaseY = Infinity;
-    for (const r of activeRoots) {
-      const table = r.getObjectByName('biombo-table-asset') || r;
-      table.updateWorldMatrix(true, true);
-      const box = new THREE.Box3().setFromObject(table);
-      if (box.min.y < lowestBaseY) {
-        lowestBaseY = box.min.y;
-      }
-    }
-
     if (this.backdropRoot) {
-      this.backdropRoot.updateWorldMatrix(true, true);
-      const floorObj = this.backdropRoot.getObjectByName('backdrop-main-floor') || this.backdropRoot;
-      const floorBox = new THREE.Box3().setFromObject(floorObj);
-      const currentFloorTop = floorBox.max.y;
-
-      if (Number.isFinite(lowestBaseY) && Number.isFinite(currentFloorTop)) {
-        const adjustment = (lowestBaseY - currentFloorTop) - 0.02;
-        this.backdropRoot.position.y += adjustment;
-      } else {
-        this.backdropRoot.position.y = lowestBaseY !== Infinity ? lowestBaseY - 0.02 : -19.22;
-      }
+      this.backdropRoot.position.y = targetFloorY;
       this.backdropRoot.updateWorldMatrix(true, true);
     }
 
-    // ⭐ ESTRADO ARQUITECTÓNICO DEL SEGUNDO NIVEL PARA BIOMBOS CUÁDRUPLES
     if (this.quaternaryRig && this.tertiaryRig && this.secondaryRig) {
-      const frontRoots = [this.tertiaryRig.root, this.quaternaryRig.root];
-      const backRoots = [this.machineRoot, this.secondaryRig.root];
+      const scale = portrait ? 0.26 : 0.3;
+      const verticalSeparation = portrait ? 5.5 : 4.0;
+      const depthSeparation = portrait ? 9 : 12;
 
-      let frontBaseY = Infinity;
-      for (const r of frontRoots) {
-        const table = r.getObjectByName('biombo-table-asset') || r;
-        table.updateWorldMatrix(true, true);
-        const box = new THREE.Box3().setFromObject(table);
-        if (box.min.y < frontBaseY) frontBaseY = box.min.y;
-      }
+      const frontBaseY = -verticalSeparation + biomboElevation - floorClearance * scale;
+      const backBaseY = verticalSeparation + biomboElevation - floorClearance * scale;
+      const podiumHeight = backBaseY - frontBaseY;
 
-      let backBaseY = Infinity;
-      for (const r of backRoots) {
-        const table = r.getObjectByName('biombo-table-asset') || r;
-        table.updateWorldMatrix(true, true);
-        const box = new THREE.Box3().setFromObject(table);
-        if (box.min.y < backBaseY) backBaseY = box.min.y;
-      }
-
-      if (Number.isFinite(frontBaseY) && Number.isFinite(backBaseY) && backBaseY > frontBaseY) {
-        const podiumHeight = backBaseY - frontBaseY;
-        const depthSeparation = portrait ? 9 : 12;
-        this.updateStagePodium(frontBaseY, podiumHeight, depthSeparation);
-      }
+      this.updateStagePodium(frontBaseY, podiumHeight, depthSeparation);
     } else {
       if (this.stagePodium) {
         this.stagePodium.visible = false;
@@ -1038,7 +1163,6 @@ export class BiomboEngineService {
     }
   }
 
-  // ⭐ CONSTRUCCIÓN DEL ESTRADO/TARIMA PARA EL GRADERÍO TRASERO
   private updateStagePodium(frontBaseY: number, podiumHeight: number, depthSeparation: number): void {
     if (!this.stagePodium) {
       this.stagePodium = new THREE.Group();
@@ -1075,7 +1199,6 @@ export class BiomboEngineService {
       envMapIntensity: 1.1,
     });
 
-    // 1. Bloque base del estrado
     const baseGeo = new THREE.BoxGeometry(podiumWidth, podiumHeight, podiumDepth);
     const baseMesh = new THREE.Mesh(baseGeo, stoneMaterial);
     baseMesh.position.set(0, centerY, centerZ);
@@ -1083,7 +1206,6 @@ export class BiomboEngineService {
     baseMesh.castShadow = true;
     this.stagePodium.add(baseMesh);
 
-    // 2. Cornisa superior biselada
     const topCapHeight = 0.35;
     const capGeo = new THREE.BoxGeometry(podiumWidth + 0.8, topCapHeight, podiumDepth + 0.8);
     const capMesh = new THREE.Mesh(capGeo, stoneMaterial);
@@ -1092,7 +1214,6 @@ export class BiomboEngineService {
     capMesh.castShadow = true;
     this.stagePodium.add(capMesh);
 
-    // 3. Moldura dorada decorativa en el borde frontal (acabado palaciego)
     const trimHeight = 0.12;
     const trimGeo = new THREE.BoxGeometry(podiumWidth + 0.9, trimHeight, 0.1);
     const trimMesh = new THREE.Mesh(trimGeo, goldMaterial);
@@ -1107,36 +1228,6 @@ export class BiomboEngineService {
     this.stagePodium.visible = true;
   }
 
-  private alignLotteryTableToBiombo(root: THREE.Group): void {
-    const table = root.getObjectByName('biombo-table-asset');
-    const machineAnchor = root.getObjectByName('sphere-rotation-pivot');
-    const tableAnchor = table?.getObjectByName('Circle005')
-      || table?.getObjectByName('Circle005_1')
-      || table?.getObjectByName('Back Panel');
-
-    if (!table || !machineAnchor || !tableAnchor) {
-      throw new Error('Error al centrar la mesa con el biombo.');
-    }
-
-    root.updateWorldMatrix(true, true);
-    const tableCenterWorld = new THREE.Box3()
-      .setFromObject(tableAnchor)
-      .getCenter(new THREE.Vector3());
-    const machineCenterScreen = machineAnchor.getWorldPosition(new THREE.Vector3()).project(this.camera);
-    const tableCenterScreen = tableCenterWorld.clone().project(this.camera);
-    const targetCenterWorld = new THREE.Vector3(
-      machineCenterScreen.x,
-      machineCenterScreen.y,
-      tableCenterScreen.z,
-    ).unproject(this.camera);
-    const currentCenterRoot = root.worldToLocal(tableCenterWorld);
-    const targetCenterRoot = root.worldToLocal(targetCenterWorld);
-
-    table.position.add(targetCenterRoot.sub(currentCenterRoot));
-    root.updateWorldMatrix(true, true);
-  }
-
-  // ⭐ ESTACIONAMIENTO DE BOLAS EN LOS RIELES VERTICALES SUPERIORES (BACK WALL)
   private stageBallsInChutes(
     machineRoot: THREE.Group,
     balls: THREE.Mesh[],
@@ -1181,7 +1272,6 @@ export class BiomboEngineService {
     }
   }
 
-  // ⭐ ACTIVACIÓN DE LA CAÍDA ESCALONADA EN CASCADA
   private triggerBallDrop(ballStates: AgitationBallState[]): void {
     const numChutes = 8;
     ballStates.forEach((ballState, index) => {
@@ -1221,158 +1311,21 @@ export class BiomboEngineService {
     shaftAssembly.position.copy(this.rotationCenter);
 
     const shaftMaterial = new THREE.MeshStandardMaterial({
-      color: 0xb7c0c8,
-      metalness: 0.96,
-      roughness: 0.2,
-    });
-    const edgeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x69737d,
-      metalness: 0.9,
-      roughness: 0.32,
+      color: 0x9098a2,
+      metalness: 0.95,
+      roughness: 0.25,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.0,
     });
 
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 15.4, 24), shaftMaterial);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 15.0, 24), shaftMaterial);
     shaft.rotation.z = Math.PI / 2;
     shaft.castShadow = true;
     shaft.receiveShadow = true;
     shaftAssembly.add(shaft);
 
-    for (const position of [-5.9, 5.9]) {
-      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.42, 24), edgeMaterial);
-      collar.rotation.z = Math.PI / 2;
-      collar.position.x = position;
-      collar.castShadow = true;
-      shaftAssembly.add(collar);
-    }
-
-    const bearingMaterial = new THREE.MeshStandardMaterial({
-      color: 0x171a1f,
-      metalness: 0.72,
-      roughness: 0.78,
-    });
-    for (const position of [-6.25, 6.25]) {
-      const bearing = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.8, 24), bearingMaterial);
-      bearing.rotation.z = Math.PI / 2;
-      bearing.position.set(position, this.rotationCenter.y, this.rotationCenter.z);
-      bearing.castShadow = true;
-      bearing.receiveShadow = true;
-      this.machineRoot.add(bearing);
-
-      const mount = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.25, 1.6), bearingMaterial);
-      mount.position.set(position, this.rotationCenter.y + 1.03, 0);
-      mount.castShadow = true;
-      mount.receiveShadow = true;
-      this.machineRoot.add(mount);
-    }
-
     this.machineRoot.add(shaftAssembly);
     this.mainRotationShaftGroup = shaftAssembly;
-  }
-
-  private buildInternalMechanism(): void {
-    const hollowMesh = this.solids['hollow']?.mesh;
-    if (!hollowMesh) {
-      return;
-    }
-    hollowMesh.renderOrder = 10;
-
-    const mechanism = new THREE.Group();
-    mechanism.name = 'internal-mechanism';
-    mechanism.position.set(0, 0, 0);
-    mechanism.renderOrder = 2;
-
-    const tubeMaterial = new THREE.MeshStandardMaterial({
-      color: 0xc8d2df,
-      emissive: 0x344b68,
-      emissiveIntensity: 0.3,
-      metalness: 0.95,
-      roughness: 0.2,
-    });
-
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 1.3, 24), tubeMaterial);
-    hub.rotation.z = Math.PI / 2;
-    mechanism.add(hub);
-
-    const hubCap = new THREE.Mesh(new THREE.SphereGeometry(0.62, 20, 20), tubeMaterial);
-    mechanism.add(hubCap);
-
-    for (let index = 0; index < 3; index++) {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 6.6, 14), tubeMaterial);
-      tube.rotation.z = Math.PI / 2;
-      tube.rotation.y = (index * Math.PI) / 3;
-      tube.rotation.x = index % 2 === 0 ? 0.08 : -0.08;
-      mechanism.add(tube);
-    }
-
-    const circularTube = new THREE.Mesh(
-      new THREE.TorusGeometry(3.45, 0.1, 12, 72),
-      tubeMaterial,
-    );
-    circularTube.rotation.x = Math.PI / 2;
-    mechanism.add(circularTube);
-
-    hollowMesh.add(mechanism);
-    this.mechanismGroup = mechanism;
-    this.buildInternalSupportTripod(hollowMesh);
-
-    const ballGroup = new THREE.Group();
-    ballGroup.name = 'internal-ball-group';
-    ballGroup.renderOrder = 3;
-    hollowMesh.add(ballGroup);
-    this.ballGroup = ballGroup;
-    this.buildAgitationBalls();
-  }
-
-  private buildInternalSupportTripod(hollowMesh: THREE.Mesh): void {
-    const tripod = new THREE.Group();
-    tripod.renderOrder = 4;
-
-    const supportMaterial = new THREE.MeshStandardMaterial({
-      color: 0x20242a,
-      metalness: 0.9,
-      roughness: 0.42,
-    });
-    const anchorMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3b424c,
-      metalness: 0.94,
-      roughness: 0.24,
-    });
-    const center = new THREE.Vector3();
-    const shaftCoupler = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.42, 0.42, 1.25, 24),
-      supportMaterial,
-    );
-    shaftCoupler.rotation.z = Math.PI / 2;
-    shaftCoupler.castShadow = true;
-    tripod.add(shaftCoupler);
-
-    const anchorRadius = 4.72;
-    for (let index = 0; index < 3; index++) {
-      const angle = (index * Math.PI * 2) / 3 + Math.PI / 2;
-      const endpoint = new THREE.Vector3(
-        0,
-        Math.cos(angle) * anchorRadius,
-        Math.sin(angle) * anchorRadius,
-      );
-      const direction = endpoint.clone().sub(center);
-      const rod = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.14, direction.length(), 14),
-        supportMaterial,
-      );
-      rod.position.copy(center).add(endpoint).multiplyScalar(0.5);
-      rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-      rod.castShadow = true;
-      rod.receiveShadow = true;
-      tripod.add(rod);
-
-      const anchor = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), anchorMaterial);
-      anchor.position.copy(endpoint);
-      anchor.castShadow = true;
-      anchor.receiveShadow = true;
-      tripod.add(anchor);
-    }
-
-    hollowMesh.add(tripod);
   }
 
   private buildAgitationBalls(): void {
@@ -1446,52 +1399,57 @@ export class BiomboEngineService {
     mechanismGroup: THREE.Group | undefined,
     stateRef: { mainRotationAngle: number; mechanismBias: number },
   ): number {
-    const isAgitating = state === 'SHUFFLING';
-    const shaftSpeed = isAgitating ? 0.068 : 0;
-    stateRef.mainRotationAngle += shaftSpeed;
+    const isRoundActive = state === 'SHUFFLING' || state === 'PICKING';
+    const isShuffling = state === 'SHUFFLING';
 
-    if (shaftGroup) {
-      shaftGroup.rotation.set(stateRef.mainRotationAngle, 0, 0);
-    }
     if (drumGroup) {
-      drumGroup.rotation.set(stateRef.mainRotationAngle, 0, 0);
+      drumGroup.rotation.set(0, 0, 0);
     }
+    if (shaftGroup) {
+      shaftGroup.rotation.set(0, 0, 0);
+    }
+
+    let spinSpeed = 0.014;
+    if (isShuffling) {
+      spinSpeed = 0.085;
+    } else if (isRoundActive) {
+      spinSpeed = 0.045;
+    }
+
     if (mechanismGroup) {
-      stateRef.mechanismBias += isAgitating ? 0.03 : 0.005;
-      const agitationBoost = isAgitating ? 1 : 0.12;
-      mechanismGroup.rotation.y += (0.035 + Math.sin(stateRef.mechanismBias * 1.8) * 0.02) * agitationBoost;
-      mechanismGroup.rotation.x = (Math.sin(stateRef.mechanismBias * 2.4) * 0.6) * agitationBoost;
-      mechanismGroup.rotation.z = (Math.cos(stateRef.mechanismBias * 2.9) * 0.35) * agitationBoost;
+      mechanismGroup.rotation.z -= spinSpeed;
     }
-    return shaftSpeed;
+
+    return isShuffling ? spinSpeed : 0.014;
   }
 
+  // ⭐ FÍSICA ANALÍTICA DE IMPACTO REAL ENTRE LAS PALAS Y LAS BOLAS
   private stepRigBallPhysics(
     state: BiomboState,
     ballGroup: THREE.Group | undefined,
+    mechanismGroup: THREE.Group | undefined,
     ballStates: AgitationBallState[],
-    shaftSpeed: number,
+    spinSpeed: number,
     deltaSeconds: number,
   ): void {
-    if (ballStates.length === 0 || state === 'IDLE') {
+    if (ballStates.length === 0) {
       return;
     }
 
-    const isAgitating = state === 'SHUFFLING';
+    const isShuffling = state === 'SHUFFLING';
+    const isPicking = state === 'PICKING';
+    const isRoundActive = isShuffling || isPicking;
     const sphereRadius = 9.8;
-    const drumQuaternion = new THREE.Quaternion();
-    if (ballGroup) {
-      ballGroup.getWorldQuaternion(drumQuaternion);
-    }
 
-    const worldGravityDir = new THREE.Vector3(0, -1, 0);
-    const localGravityDir = worldGravityDir.clone().applyQuaternion(drumQuaternion.clone().invert());
-    const drumAngularVelocityX = shaftSpeed / deltaSeconds;
+    // Ángulo actual del mecanismo y velocidad angular en rad/s
+    const paddleAngle = mechanismGroup ? mechanismGroup.rotation.z : 0;
+    const omega = spinSpeed / Math.max(deltaSeconds, 0.001); // rad/s
 
     ballStates.forEach((ballState) => {
       const ball = ballState.mesh;
       const velocity = ballState.velocity;
 
+      // 1. Descenso escalonado desde los rieles superiores
       if (ballState.isDropping) {
         if (ballState.dropDelay && ballState.dropDelay > 0) {
           ballState.dropDelay -= deltaSeconds;
@@ -1501,7 +1459,6 @@ export class BiomboEngineService {
         velocity.y -= 75.0 * deltaSeconds;
         velocity.x += -ball.position.x * 2.2 * deltaSeconds;
         velocity.z += -ball.position.z * 2.2 * deltaSeconds;
-
         ball.position.addScaledVector(velocity, deltaSeconds);
 
         if (ball.position.y < 7.0) {
@@ -1510,58 +1467,104 @@ export class BiomboEngineService {
         return;
       }
 
-      if (isAgitating) {
-        const currentDistance = ball.position.length();
-        const wallProximity = currentDistance / (sphereRadius - ballState.radius);
+      // 2. Gravedad local natural hacia el fondo de la esfera
+      velocity.y -= (isRoundActive ? 62.0 : 85.0) * deltaSeconds;
 
-        if (wallProximity > 0.82) {
-          const tangentialVy = -drumAngularVelocityX * ball.position.z * 0.45;
-          const tangentialVz = drumAngularVelocityX * ball.position.y * 0.45;
-          velocity.y += (tangentialVy - velocity.y) * 4.5 * deltaSeconds;
-          velocity.z += (tangentialVz - velocity.z) * 4.5 * deltaSeconds;
-        }
+      // 3. FÍSICA DE IMPACTO CON LAS 3 PALAS DEL AGITADOR (a 120 grados)
+      const bx = ball.position.x;
+      const by = ball.position.y;
+      const bz = ball.position.z;
+      const ballDist = Math.sqrt(bx * bx + by * by);
 
-        const localY = ball.position.dot(localGravityDir.clone().negate());
-        if (localY < -4.8) {
-          const loft = Math.random() * 42.0 + 34.0;
-          velocity.addScaledVector(localGravityDir.clone().negate(), loft * deltaSeconds * 2.2);
+      // Si la bola está en la zona de barrido radial y en profundidad
+      if (ballDist > 0.8 && ballDist < 9.3 && Math.abs(bz) < 3.8) {
+        for (let k = 0; k < 3; k++) {
+          const bladeTheta = paddleAngle + k * ((2 * Math.PI) / 3);
 
-          velocity.x += (Math.random() - 0.5) * 36.0 * deltaSeconds;
-          velocity.z += (Math.random() - 0.5) * 36.0 * deltaSeconds;
-        }
+          // Componente radial a lo largo del aspa
+          const dRadial = bx * Math.cos(bladeTheta) + by * Math.sin(bladeTheta);
 
-        velocity.addScaledVector(localGravityDir, 58.0 * deltaSeconds);
+          if (dRadial > 0.8 && dRadial < 9.2) {
+            // Distancia perpendicular a la cara del aspa
+            const dPerp = bx * Math.sin(bladeTheta) - by * Math.cos(bladeTheta);
 
-        velocity.x *= Math.pow(0.994, deltaSeconds * 60);
-        velocity.z *= Math.pow(0.994, deltaSeconds * 60);
-        velocity.y *= Math.pow(0.996, deltaSeconds * 60);
+            // Vector normal en sentido de avance horario de la pala
+            const nx = Math.sin(bladeTheta);
+            const ny = -Math.cos(bladeTheta);
 
-        const maxSpeed = 54.0;
-        if (velocity.lengthSq() > maxSpeed * maxSpeed) {
-          velocity.setLength(maxSpeed);
-        }
-      } else {
-        const localY = ball.position.dot(localGravityDir.clone().negate());
-        velocity.addScaledVector(localGravityDir, 105.0 * deltaSeconds);
+            const collisionThreshold = ballState.radius + 0.45;
 
-        velocity.x *= Math.pow(0.96, deltaSeconds * 60);
-        velocity.z *= Math.pow(0.96, deltaSeconds * 60);
-        velocity.y *= Math.pow(0.97, deltaSeconds * 60);
+            // Detección de colisión frontal con la pala
+            if (dPerp > -0.6 && dPerp < collisionThreshold) {
+              // Corrección de penetración para que la pala no atraviese la bola
+              const penetration = collisionThreshold - dPerp + 0.12;
+              ball.position.x += nx * penetration;
+              ball.position.y += ny * penetration;
 
-        if (localY < -6.0) {
-          velocity.multiplyScalar(Math.pow(0.65, deltaSeconds * 60));
-          if (velocity.lengthSq() < 0.25) {
-            velocity.set(0, 0, 0);
+              // Velocidad lineal de la pala en ese radio de impacto
+              const bladeLinearSpeed = omega * dRadial;
+              const bladeVx = nx * bladeLinearSpeed;
+              const bladeVy = ny * bladeLinearSpeed;
+
+              // Velocidad relativa
+              const relVx = bladeVx - velocity.x;
+              const relVy = bladeVy - velocity.y;
+              const impactDot = relVx * nx + relVy * ny;
+
+              // Si la pala está empujando o impactando la bola
+              if (impactDot > 0 || isRoundActive) {
+                const bounce = isShuffling ? 1.45 : (isPicking ? 1.25 : 0.8);
+                const impulse = Math.max(impactDot, isShuffling ? 18.0 : 6.0) * bounce;
+
+                velocity.x += nx * impulse;
+                velocity.y += ny * impulse;
+
+                // ⭐ Efecto cuchara (Scoop): Las palas del extremo proyectan las bolas hacia arriba
+                if (dRadial > 5.5) {
+                  const scoopLoft = isShuffling ? 36.0 : (isPicking ? 18.0 : 6.0);
+                  velocity.y += scoopLoft;
+                  // Dispersión tridimensional para que bailen dentro de la esfera
+                  velocity.z += (Math.random() - 0.5) * (isShuffling ? 28.0 : 12.0);
+                }
+
+                // Rotación de la bola por el golpe
+                ball.rotation.x += (Math.random() - 0.5) * 4.0;
+                ball.rotation.y += (Math.random() - 0.5) * 4.0;
+                ball.rotation.z -= spinSpeed * 8.0;
+              }
+            }
           }
         }
       }
 
+      // 4. Rozamiento y amortiguación aerodinámica
+      const dragFactor = isRoundActive ? 0.992 : 0.96;
+      velocity.x *= Math.pow(dragFactor, deltaSeconds * 60);
+      velocity.z *= Math.pow(dragFactor, deltaSeconds * 60);
+      velocity.y *= Math.pow(dragFactor, deltaSeconds * 60);
+
+      const maxSpeed = isShuffling ? 52.0 : 28.0;
+      if (velocity.lengthSq() > maxSpeed * maxSpeed) {
+        velocity.setLength(maxSpeed);
+      }
+
+      // Reposo en el fondo cuando no hay agitación
+      if (!isRoundActive && ball.position.y < -6.8) {
+        velocity.multiplyScalar(Math.pow(0.55, deltaSeconds * 60));
+        if (velocity.lengthSq() < 0.2) {
+          velocity.set(0, 0, 0);
+        }
+      }
+
+      // Integración de posición
       ball.position.addScaledVector(velocity, deltaSeconds);
 
-      ball.rotation.x += velocity.z * deltaSeconds * 1.25;
-      ball.rotation.z -= velocity.x * deltaSeconds * 1.25;
-      ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.35;
+      // Rotación pasiva
+      ball.rotation.x += velocity.z * deltaSeconds * 1.2;
+      ball.rotation.z -= velocity.x * deltaSeconds * 1.2;
+      ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.3;
 
+      // 5. Contención elástica dentro de la esfera de cristal
       const currentDistance = ball.position.length();
       const maxAllowedDistance = sphereRadius - ballState.radius;
 
@@ -1571,42 +1574,57 @@ export class BiomboEngineService {
         const dot = velocity.dot(normal);
 
         if (dot > 0) {
-          if (isAgitating) {
-            const bounce = 1.82;
-            velocity.sub(normal.multiplyScalar(bounce * dot));
-            velocity.x += (Math.random() - 0.5) * 5.0;
-            velocity.z += (Math.random() - 0.5) * 5.0;
-          } else {
-            velocity.sub(normal.multiplyScalar(dot));
-            velocity.multiplyScalar(0.6);
-          }
+          const wallBounce = isShuffling ? 0.85 : 0.55;
+          velocity.sub(normal.multiplyScalar((1 + wallBounce) * dot));
+          // Leve fricción superficial con el cristal
+          velocity.x += (Math.random() - 0.5) * 2.0;
+          velocity.z += (Math.random() - 0.5) * 2.0;
         }
       }
     });
 
+    // 6. Colisión y rebote elástico entre bolas
     for (let i = 0; i < ballStates.length; i++) {
       for (let j = i + 1; j < ballStates.length; j++) {
-        const delta = new THREE.Vector3().subVectors(ballStates[j].mesh.position, ballStates[i].mesh.position);
-        const distance = delta.length();
-        const minDistance = ballStates[i].radius + ballStates[j].radius;
+        const bi = ballStates[i].mesh.position;
+        const bj = ballStates[j].mesh.position;
+        const dx = bj.x - bi.x;
+        const dy = bj.y - bi.y;
+        const dz = bj.z - bi.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const minDist = ballStates[i].radius + ballStates[j].radius;
 
-        if (distance < minDistance && distance > 0.0001) {
-          const normal = delta.clone().normalize();
-          const overlap = minDistance - distance;
-          const correction = normal.clone().multiplyScalar(overlap * 0.5);
+        if (distSq < minDist * minDist && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const nz = dz / dist;
+          const overlap = (minDist - dist) * 0.5;
 
-          ballStates[i].mesh.position.sub(correction);
-          ballStates[j].mesh.position.add(correction);
+          bi.x -= nx * overlap;
+          bi.y -= ny * overlap;
+          bi.z -= nz * overlap;
 
-          if (isAgitating) {
-            const relativeVelocity = new THREE.Vector3().subVectors(ballStates[i].velocity, ballStates[j].velocity);
-            const speedAlongNormal = relativeVelocity.dot(normal);
+          bj.x += nx * overlap;
+          bj.y += ny * overlap;
+          bj.z += nz * overlap;
 
-            if (speedAlongNormal > 0) {
-              const impulse = normal.clone().multiplyScalar(speedAlongNormal * 0.92);
-              ballStates[i].velocity.sub(impulse);
-              ballStates[j].velocity.add(impulse);
-            }
+          const relVx = ballStates[i].velocity.x - ballStates[j].velocity.x;
+          const relVy = ballStates[i].velocity.y - ballStates[j].velocity.y;
+          const relVz = ballStates[i].velocity.z - ballStates[j].velocity.z;
+          const normalVel = relVx * nx + relVy * ny + relVz * nz;
+
+          if (normalVel > 0) {
+            const restitution = isShuffling ? 0.92 : 0.65;
+            const impulse = normalVel * restitution;
+
+            ballStates[i].velocity.x -= nx * impulse;
+            ballStates[i].velocity.y -= ny * impulse;
+            ballStates[i].velocity.z -= nz * impulse;
+
+            ballStates[j].velocity.x += nx * impulse;
+            ballStates[j].velocity.y += ny * impulse;
+            ballStates[j].velocity.z += nz * impulse;
           }
         }
       }
@@ -1631,6 +1649,7 @@ export class BiomboEngineService {
     this.stepRigBallPhysics(
       this.state(),
       this.ballGroup,
+      this.mechanismGroup,
       this.agitationBallStates,
       alphaSpeed,
       deltaSeconds,
@@ -1647,6 +1666,7 @@ export class BiomboEngineService {
       this.stepRigBallPhysics(
         this.secondaryState(),
         this.secondaryRig.ballGroup,
+        this.secondaryRig.mechanismGroup,
         this.secondaryRig.agitationBallStates,
         secSpeed,
         deltaSeconds,
@@ -1664,6 +1684,7 @@ export class BiomboEngineService {
       this.stepRigBallPhysics(
         this.tertiaryState(),
         this.tertiaryRig.ballGroup,
+        this.tertiaryRig.mechanismGroup,
         this.tertiaryRig.agitationBallStates,
         terSpeed,
         deltaSeconds,
@@ -1681,6 +1702,7 @@ export class BiomboEngineService {
       this.stepRigBallPhysics(
         this.quaternaryState(),
         this.quaternaryRig.ballGroup,
+        this.quaternaryRig.mechanismGroup,
         this.quaternaryRig.agitationBallStates,
         quatSpeed,
         deltaSeconds,
