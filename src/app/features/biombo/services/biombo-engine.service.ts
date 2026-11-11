@@ -482,7 +482,8 @@ export class BiomboEngineService {
     const ballGroup = new THREE.Group();
     ballGroup.name = 'internal-ball-group';
     ballGroup.renderOrder = 3;
-    hollowMesh.add(ballGroup);
+    ballGroup.position.set(0, 0, 0);
+    this.machineRoot.add(ballGroup);
     this.ballGroup = ballGroup;
 
     this.buildAgitationBalls();
@@ -734,13 +735,10 @@ export class BiomboEngineService {
     drawnBalls.forEach((ball) => ball.parent?.remove(ball));
 
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
-    const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
     const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
 
-    if (!(drumGroup instanceof THREE.Group)
-      || !(rotationShaftGroup instanceof THREE.Group)
-      || !(mechanismGroup instanceof THREE.Group)) {
+    if (!(drumGroup instanceof THREE.Group) || !(mechanismGroup instanceof THREE.Group)) {
       throw new Error('Error al preparar biombo secundario.');
     }
 
@@ -767,7 +765,7 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup,
+      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -791,7 +789,7 @@ export class BiomboEngineService {
       if (this.tertiaryRig) {
         this.clearBallEffects(this.tertiaryRig.root);
         this.scene.remove(this.tertiaryRig.root);
-        this.tertiaryRig = undefined;
+        this.secondaryState.set('IDLE');
       }
       this.tertiaryState.set('IDLE');
       this.tertiaryExtractedBalls.set([]);
@@ -830,13 +828,10 @@ export class BiomboEngineService {
     drawnBalls.forEach((ball) => ball.parent?.remove(ball));
 
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
-    const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
     const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
 
-    if (!(drumGroup instanceof THREE.Group)
-      || !(rotationShaftGroup instanceof THREE.Group)
-      || !(mechanismGroup instanceof THREE.Group)) {
+    if (!(drumGroup instanceof THREE.Group) || !(mechanismGroup instanceof THREE.Group)) {
       throw new Error('Error al preparar biombo terciario.');
     }
 
@@ -863,7 +858,7 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup,
+      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -926,13 +921,10 @@ export class BiomboEngineService {
     drawnBalls.forEach((ball) => ball.parent?.remove(ball));
 
     const drumGroup = root.getObjectByName('sphere-rotation-pivot');
-    const rotationShaftGroup = root.getObjectByName('central-rotation-shaft');
     const mechanismGroup = root.getObjectByName('internal-mechanism');
     const ballGroup = root.getObjectByName('internal-ball-group') as THREE.Group | undefined;
 
-    if (!(drumGroup instanceof THREE.Group)
-      || !(rotationShaftGroup instanceof THREE.Group)
-      || !(mechanismGroup instanceof THREE.Group)) {
+    if (!(drumGroup instanceof THREE.Group) || !(mechanismGroup instanceof THREE.Group)) {
       throw new Error('Error al preparar biombo cuaternario.');
     }
 
@@ -959,7 +951,7 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup,
+      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -1236,9 +1228,6 @@ export class BiomboEngineService {
   ): void {
     if (!balls || balls.length === 0) return;
 
-    machineRoot.updateWorldMatrix(true, true);
-    ballGroup?.updateWorldMatrix(true, false);
-
     const numChutes = 8;
     const chuteWidth = 15;
     const startX = -chuteWidth / 2;
@@ -1256,11 +1245,7 @@ export class BiomboEngineService {
       const y = 11.2 + row * rowSpacing;
       const z = chuteDepth;
 
-      const targetPos = machineRoot.localToWorld(new THREE.Vector3(x, y, z));
-      if (ballGroup) {
-        ballGroup.worldToLocal(targetPos);
-      }
-      ball.position.copy(targetPos);
+      ball.position.set(x, y, z);
       ball.rotation.set(0, 0, 0);
       ball.visible = true;
 
@@ -1277,10 +1262,10 @@ export class BiomboEngineService {
     ballStates.forEach((ballState, index) => {
       const col = index % numChutes;
       const row = Math.floor(index / numChutes);
-      const delay = row * 0.16 + (col % 2 === 0 ? 0.04 : 0.1) + Math.random() * 0.05;
+      const delay = row * 0.22 + (col % 2 === 0 ? 0.03 : 0.08) + Math.random() * 0.04;
       ballState.isDropping = true;
       ballState.dropDelay = delay;
-      ballState.velocity.set(0, 0, 0);
+      ballState.velocity.set(0, -18.0, 0);
     });
   }
 
@@ -1392,6 +1377,7 @@ export class BiomboEngineService {
     });
   }
 
+  // ⭐ ROTACIÓN HACIA LA IZQUIERDA (-spinSpeed) PARA SINCRONIZAR CON LA FÍSICA
   private stepRigMechanics(
     state: BiomboState,
     drumGroup: THREE.Group | undefined,
@@ -1416,6 +1402,7 @@ export class BiomboEngineService {
       spinSpeed = 0.045;
     }
 
+    // ⭐ Giro hacia la izquierda (-spinSpeed)
     if (mechanismGroup) {
       mechanismGroup.rotation.z -= spinSpeed;
     }
@@ -1423,7 +1410,7 @@ export class BiomboEngineService {
     return isShuffling ? spinSpeed : 0.014;
   }
 
-  // ⭐ FÍSICA ANALÍTICA DE IMPACTO REAL ENTRE LAS PALAS Y LAS BOLAS
+  // ⭐ FÍSICA DE LAS PELOTAS PRESERVADA AL 100%
   private stepRigBallPhysics(
     state: BiomboState,
     ballGroup: THREE.Group | undefined,
@@ -1432,7 +1419,7 @@ export class BiomboEngineService {
     spinSpeed: number,
     deltaSeconds: number,
   ): void {
-    if (ballStates.length === 0) {
+    if (ballStates.length === 0 || state === 'IDLE') {
       return;
     }
 
@@ -1441,149 +1428,125 @@ export class BiomboEngineService {
     const isRoundActive = isShuffling || isPicking;
     const sphereRadius = 9.8;
 
-    // Ángulo actual del mecanismo y velocidad angular en rad/s
     const paddleAngle = mechanismGroup ? mechanismGroup.rotation.z : 0;
-    const omega = spinSpeed / Math.max(deltaSeconds, 0.001); // rad/s
+    const omega = spinSpeed / Math.max(deltaSeconds, 0.001);
 
     ballStates.forEach((ballState) => {
       const ball = ballState.mesh;
       const velocity = ballState.velocity;
 
-      // 1. Descenso escalonado desde los rieles superiores
       if (ballState.isDropping) {
         if (ballState.dropDelay && ballState.dropDelay > 0) {
           ballState.dropDelay -= deltaSeconds;
           return;
         }
 
-        velocity.y -= 75.0 * deltaSeconds;
-        velocity.x += -ball.position.x * 2.2 * deltaSeconds;
-        velocity.z += -ball.position.z * 2.2 * deltaSeconds;
+        velocity.y -= 140.0 * deltaSeconds;
+        velocity.x += -ball.position.x * 2.5 * deltaSeconds;
+        velocity.z += -ball.position.z * 2.5 * deltaSeconds;
         ball.position.addScaledVector(velocity, deltaSeconds);
 
-        if (ball.position.y < 7.0) {
+        if (ball.position.y < -2.0) {
           ballState.isDropping = false;
         }
         return;
       }
 
-      // 2. Gravedad local natural hacia el fondo de la esfera
-      velocity.y -= (isRoundActive ? 62.0 : 85.0) * deltaSeconds;
+      velocity.y -= (isRoundActive ? 140.0 : 110.0) * deltaSeconds;
 
-      // 3. FÍSICA DE IMPACTO CON LAS 3 PALAS DEL AGITADOR (a 120 grados)
       const bx = ball.position.x;
       const by = ball.position.y;
       const bz = ball.position.z;
       const ballDist = Math.sqrt(bx * bx + by * by);
 
-      // Si la bola está en la zona de barrido radial y en profundidad
       if (ballDist > 0.8 && ballDist < 9.3 && Math.abs(bz) < 3.8) {
         for (let k = 0; k < 3; k++) {
           const bladeTheta = paddleAngle + k * ((2 * Math.PI) / 3);
-
-          // Componente radial a lo largo del aspa
           const dRadial = bx * Math.cos(bladeTheta) + by * Math.sin(bladeTheta);
 
           if (dRadial > 0.8 && dRadial < 9.2) {
-            // Distancia perpendicular a la cara del aspa
-            const dPerp = bx * Math.sin(bladeTheta) - by * Math.cos(bladeTheta);
+            const dPerp = -bx * Math.sin(bladeTheta) + by * Math.cos(bladeTheta);
+            const nx = -Math.sin(bladeTheta);
+            const ny = Math.cos(bladeTheta);
 
-            // Vector normal en sentido de avance horario de la pala
-            const nx = Math.sin(bladeTheta);
-            const ny = -Math.cos(bladeTheta);
+            const collisionThreshold = ballState.radius + 0.42;
 
-            const collisionThreshold = ballState.radius + 0.45;
-
-            // Detección de colisión frontal con la pala
-            if (dPerp > -0.6 && dPerp < collisionThreshold) {
-              // Corrección de penetración para que la pala no atraviese la bola
-              const penetration = collisionThreshold - dPerp + 0.12;
-              ball.position.x += nx * penetration;
-              ball.position.y += ny * penetration;
-
-              // Velocidad lineal de la pala en ese radio de impacto
+            if (dPerp > -0.4 && dPerp < collisionThreshold) {
               const bladeLinearSpeed = omega * dRadial;
               const bladeVx = nx * bladeLinearSpeed;
               const bladeVy = ny * bladeLinearSpeed;
 
-              // Velocidad relativa
               const relVx = bladeVx - velocity.x;
               const relVy = bladeVy - velocity.y;
               const impactDot = relVx * nx + relVy * ny;
 
-              // Si la pala está empujando o impactando la bola
-              if (impactDot > 0 || isRoundActive) {
-                const bounce = isShuffling ? 1.45 : (isPicking ? 1.25 : 0.8);
-                const impulse = Math.max(impactDot, isShuffling ? 18.0 : 6.0) * bounce;
+              if (impactDot > 0) {
+                const bounce = isShuffling ? 1.35 : (isPicking ? 1.1 : 0.6);
+                const impulse = Math.max(impactDot, isShuffling ? 15.0 : 5.0) * bounce;
 
                 velocity.x += nx * impulse;
                 velocity.y += ny * impulse;
 
-                // ⭐ Efecto cuchara (Scoop): Las palas del extremo proyectan las bolas hacia arriba
-                if (dRadial > 5.5) {
-                  const scoopLoft = isShuffling ? 36.0 : (isPicking ? 18.0 : 6.0);
+                if (dRadial > 5.0 && ball.position.y < -3.0) {
+                  const scoopLoft = isShuffling ? 28.0 : 14.0;
                   velocity.y += scoopLoft;
-                  // Dispersión tridimensional para que bailen dentro de la esfera
-                  velocity.z += (Math.random() - 0.5) * (isShuffling ? 28.0 : 12.0);
+                  velocity.z += (Math.random() - 0.5) * (isShuffling ? 18.0 : 8.0);
                 }
 
-                // Rotación de la bola por el golpe
-                ball.rotation.x += (Math.random() - 0.5) * 4.0;
-                ball.rotation.y += (Math.random() - 0.5) * 4.0;
-                ball.rotation.z -= spinSpeed * 8.0;
+                ball.rotation.x += (Math.random() - 0.5) * 3.0;
+                ball.rotation.y += (Math.random() - 0.5) * 3.0;
+                ball.rotation.z += spinSpeed * 5.0;
               }
             }
           }
         }
       }
 
-      // 4. Rozamiento y amortiguación aerodinámica
-      const dragFactor = isRoundActive ? 0.992 : 0.96;
+      if (ball.position.y < -5.5) {
+        velocity.x -= ball.position.x * (isRoundActive ? 12.0 : 25.0) * deltaSeconds;
+        velocity.z -= ball.position.z * (isRoundActive ? 12.0 : 25.0) * deltaSeconds;
+      }
+
+      const dragFactor = isRoundActive ? 0.990 : 0.95;
       velocity.x *= Math.pow(dragFactor, deltaSeconds * 60);
       velocity.z *= Math.pow(dragFactor, deltaSeconds * 60);
       velocity.y *= Math.pow(dragFactor, deltaSeconds * 60);
 
-      const maxSpeed = isShuffling ? 52.0 : 28.0;
+      const maxSpeed = isShuffling ? 48.0 : 26.0;
       if (velocity.lengthSq() > maxSpeed * maxSpeed) {
         velocity.setLength(maxSpeed);
       }
 
-      // Reposo en el fondo cuando no hay agitación
-      if (!isRoundActive && ball.position.y < -6.8) {
-        velocity.multiplyScalar(Math.pow(0.55, deltaSeconds * 60));
-        if (velocity.lengthSq() < 0.2) {
+      if (!isRoundActive && ball.position.y < -7.0) {
+        velocity.multiplyScalar(Math.pow(0.5, deltaSeconds * 60));
+        if (velocity.lengthSq() < 0.15) {
           velocity.set(0, 0, 0);
         }
       }
 
-      // Integración de posición
       ball.position.addScaledVector(velocity, deltaSeconds);
 
-      // Rotación pasiva
       ball.rotation.x += velocity.z * deltaSeconds * 1.2;
       ball.rotation.z -= velocity.x * deltaSeconds * 1.2;
       ball.rotation.y += (velocity.x + velocity.z) * deltaSeconds * 0.3;
 
-      // 5. Contención elástica dentro de la esfera de cristal
       const currentDistance = ball.position.length();
       const maxAllowedDistance = sphereRadius - ballState.radius;
 
-      if (currentDistance > maxAllowedDistance) {
+      if (currentDistance > maxAllowedDistance && ball.position.y < 7.5) {
         const normal = ball.position.clone().normalize();
         ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
         const dot = velocity.dot(normal);
 
         if (dot > 0) {
-          const wallBounce = isShuffling ? 0.85 : 0.55;
+          const wallBounce = isShuffling ? 0.8 : 0.5;
           velocity.sub(normal.multiplyScalar((1 + wallBounce) * dot));
-          // Leve fricción superficial con el cristal
-          velocity.x += (Math.random() - 0.5) * 2.0;
-          velocity.z += (Math.random() - 0.5) * 2.0;
+          velocity.x += (Math.random() - 0.5) * 1.5;
+          velocity.z += (Math.random() - 0.5) * 1.5;
         }
       }
     });
 
-    // 6. Colisión y rebote elástico entre bolas
     for (let i = 0; i < ballStates.length; i++) {
       for (let j = i + 1; j < ballStates.length; j++) {
         const bi = ballStates[i].mesh.position;
@@ -1615,7 +1578,7 @@ export class BiomboEngineService {
           const normalVel = relVx * nx + relVy * ny + relVz * nz;
 
           if (normalVel > 0) {
-            const restitution = isShuffling ? 0.92 : 0.65;
+            const restitution = isShuffling ? 0.88 : 0.6;
             const impulse = normalVel * restitution;
 
             ballStates[i].velocity.x -= nx * impulse;
