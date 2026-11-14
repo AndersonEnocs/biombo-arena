@@ -11,6 +11,7 @@ type BallExitAnimation = {
   duration: number;
   curve: THREE.CatmullRomCurve3;
   targetSlotPos: THREE.Vector3;
+  railInclineAngleZ: number;
   ballNumber: number;
   hasSettled: boolean;
   onSettled: () => void;
@@ -201,81 +202,87 @@ export class BiomboEngineService {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.25;
+      this.renderer.toneMappingExposure = 1.32;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
       container.replaceChildren(this.renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.82);
       this.scene.add(ambientLight);
 
-      const mainLight = new THREE.DirectionalLight(0xffffff, 1.9);
-      mainLight.position.set(15, 30, 25);
+      const mainLight = new THREE.DirectionalLight(0xffffff, 2.1);
+      mainLight.position.set(16, 32, 28);
       mainLight.castShadow = true;
+      mainLight.shadow.mapSize.width = 2048;
+      mainLight.shadow.mapSize.height = 2048;
+      mainLight.shadow.camera.near = 0.5;
+      mainLight.shadow.camera.far = 140;
+      mainLight.shadow.bias = -0.0004;
+      mainLight.shadow.normalBias = 0.02;
       this.scene.add(mainLight);
 
-      const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.95);
-      frontFillLight.position.set(0, 10, 40);
+      const frontFillLight = new THREE.DirectionalLight(0xffffff, 1.15);
+      frontFillLight.position.set(0, 12, 42);
       this.scene.add(frontFillLight);
 
-      const rimLightLeft = new THREE.PointLight(0x70a0ff, 18, 80);
-      rimLightLeft.position.set(-25, 10, 10);
+      const rimLightLeft = new THREE.PointLight(0x70b4ff, 22, 90);
+      rimLightLeft.position.set(-26, 12, 12);
       this.scene.add(rimLightLeft);
 
-      const rimLightRight = new THREE.PointLight(0xffffff, 12, 80);
-      rimLightRight.position.set(25, -10, 15);
+      const rimLightRight = new THREE.PointLight(0xffffff, 14, 90);
+      rimLightRight.position.set(26, -8, 16);
       this.scene.add(rimLightRight);
+
+      const chamberGlowLight = new THREE.PointLight(0x80d8ff, 14, 22);
+      chamberGlowLight.position.set(0, 0, 0.5);
+      this.scene.add(chamberGlowLight);
 
       const glassMaterial = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
-        metalness: 0.0,
+        metalness: 0.04,
         roughness: 0.0,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.20,
         reflectivity: 1.0,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.0,
+        clearcoatRoughness: 0.01,
         side: THREE.FrontSide,
         depthWrite: false,
         envMap: this.backgroundTexture ?? null,
-        envMapIntensity: 0.85,
+        envMapIntensity: 1.25,
       });
 
-      const rampMaterial = new THREE.MeshStandardMaterial({
-        color: 0x111317,
-        metalness: 0.75,
-        roughness: 0.35,
-        envMap: this.backgroundTexture ?? null,
-      });
-
-      const [hollow, ramp, lotteryModel] = await Promise.all([
+      const [hollow, lotteryModel] = await Promise.all([
         new SolidEntity(rapier, glassMaterial).load('/assets/hollow_sphere.fbx'),
-        new SolidEntity(rapier, rampMaterial).load('/assets/ramp.fbx'),
         new GLTFLoader().loadAsync('/assets/loteria.glb'),
       ]);
 
       this.solids['hollow'] = hollow;
-      this.solids['ramp'] = ramp;
 
       hollow.center(0);
       this.buildDrumPivot(hollow);
 
-      ramp.meshes.forEach((mesh) => this.machineRoot.add(mesh));
-
       this.lotteryTableTemplates.clear();
       lotteryModel.scene.traverse((object) => {
         const normalizedName = object.name
-          .replace(/[^a-z]/gi, '')
-          .toLowerCase()
-          .replace(/\d+$/, '');
+          .replace(/[^a-z0-9]/gi, '')
+          .toLowerCase();
+
         const tablePartName = new Map([
           ['base', 'Base'],
           ['backwall', 'Back Wall'],
           ['backpanel', 'Back Panel'],
           ['ballholder', 'Ball Holder'],
           ['ballholderglass', 'Ball Holder Glass'],
+          ['container1', 'Container_1'],
+          ['container2', 'Container_2'],
+          ['collector', 'Collector'],
+          ['collectoraxle', 'Collector_Axle'],
+          ['collectorsupport', 'Collector_Support'],
+          ['switch', 'Switch'],
         ]).get(normalizedName);
+
         if (tablePartName && !this.lotteryTableTemplates.has(tablePartName)) {
           this.lotteryTableTemplates.set(tablePartName, object);
         }
@@ -317,35 +324,89 @@ export class BiomboEngineService {
     table.scale.setScalar(scale);
 
     const backWallMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf4f4f0,
-      roughness: 0.32,
-      metalness: 0.1,
+      color: 0xf5f6f8,
+      roughness: 0.22,
+      metalness: 0.15,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 0.8,
+      envMapIntensity: 0.95,
     });
 
     const chuteRailsMaterial = new THREE.MeshStandardMaterial({
-      color: 0x353a44,
-      metalness: 0.85,
-      roughness: 0.25,
+      color: 0x22262e,
+      metalness: 0.92,
+      roughness: 0.18,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 0.9,
+      envMapIntensity: 1.15,
     });
 
     const chuteGlassMaterial = new THREE.MeshPhysicalMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.18,
-      roughness: 0.02,
+      opacity: 0.16,
+      roughness: 0.01,
       metalness: 0.0,
       clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
       side: THREE.DoubleSide,
       depthWrite: false,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 0.75,
+      envMapIntensity: 0.9,
     });
 
-    for (const name of ['Base', 'Back Wall', 'Back Panel', 'Ball Holder', 'Ball Holder Glass']) {
+    const chromeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      metalness: 0.98,
+      roughness: 0.1,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.35,
+    });
+
+    const railGlassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.20,
+      roughness: 0.02,
+      metalness: 0.05,
+      reflectivity: 1.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.25,
+    });
+
+    const railBedMaterial = new THREE.MeshStandardMaterial({
+      color: 0x14161b,
+      roughness: 0.32,
+      metalness: 0.8,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.9,
+    });
+
+    const railNeonStripMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00f0ff,
+      emissive: 0x00d2ff,
+      emissiveIntensity: 3.8,
+      roughness: 0.15,
+      metalness: 0.1,
+    });
+
+    const partsList = [
+      'Base',
+      'Back Wall',
+      'Back Panel',
+      'Ball Holder',
+      'Ball Holder Glass',
+      'Container_1',
+      'Container_2',
+      'Collector',
+      'Collector_Axle',
+      'Collector_Support',
+      'Switch',
+    ];
+
+    for (const name of partsList) {
       const template = this.lotteryTableTemplates.get(name);
       if (!template) {
         continue;
@@ -360,24 +421,54 @@ export class BiomboEngineService {
         object.castShadow = true;
         object.receiveShadow = true;
 
+        const objName = object.name.toLowerCase();
+
         if (name === 'Back Wall') {
           object.material = backWallMaterial.clone();
         } else if (name === 'Ball Holder') {
           object.material = chuteRailsMaterial.clone();
         } else if (name === 'Ball Holder Glass') {
           object.material = chuteGlassMaterial.clone();
+        } else if (
+          name === 'Collector' ||
+          name === 'Collector_Axle' ||
+          name === 'Collector_Support' ||
+          name === 'Switch'
+        ) {
+          object.material = chromeMaterial.clone();
+        } else if (name === 'Container_2' || name === 'Container_1') {
+          if (objName.includes('plane009_1') || objName.includes('neon') || objName.includes('strip')) {
+            object.material = railNeonStripMaterial.clone();
+          } else if (objName.includes('plane009') || objName.includes('front') || objName.includes('glass')) {
+            object.material = railGlassMaterial.clone();
+            object.renderOrder = 20;
+          } else {
+            object.material = railBedMaterial.clone();
+          }
         } else if (name === 'Base') {
           object.material = new THREE.MeshStandardMaterial({
             color,
             metalness: 0.45,
-            roughness: 0.4,
+            roughness: 0.38,
             envMap: this.backgroundTexture ?? null,
-            envMapIntensity: 0.8,
+            envMapIntensity: 0.85,
           });
         } else {
           object.material = Array.isArray(object.material)
-            ? object.material.map((mat) => mat.clone())
-            : object.material.clone();
+            ? object.material.map((mat) => {
+              const clone = mat.clone();
+              if ('envMap' in clone) {
+                clone.envMap = this.backgroundTexture ?? null;
+              }
+              return clone;
+            })
+            : (() => {
+              const clone = object.material.clone();
+              if ('envMap' in clone) {
+                clone.envMap = this.backgroundTexture ?? null;
+              }
+              return clone;
+            })();
         }
       });
       table.add(part);
@@ -407,27 +498,27 @@ export class BiomboEngineService {
     const neonRingMaterial = new THREE.MeshStandardMaterial({
       color: 0x00f0ff,
       emissive: 0x00d2ff,
-      emissiveIntensity: 3.5,
-      roughness: 0.2,
+      emissiveIntensity: 3.8,
+      roughness: 0.15,
       metalness: 0.1,
     });
 
     const paddleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x62b846,
-      emissive: 0x1d4715,
-      emissiveIntensity: 0.35,
-      metalness: 0.85,
-      roughness: 0.22,
+      color: 0x66bb46,
+      emissive: 0x1f4c16,
+      emissiveIntensity: 0.42,
+      metalness: 0.88,
+      roughness: 0.2,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 1.0,
+      envMapIntensity: 1.15,
     });
 
     const chromeMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      metalness: 0.96,
-      roughness: 0.12,
+      metalness: 0.98,
+      roughness: 0.1,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 1.2,
+      envMapIntensity: 1.35,
     });
 
     const paddleTemplate = lotteryScene.getObjectByName('Paddle');
@@ -464,20 +555,6 @@ export class BiomboEngineService {
 
     hollowMesh.add(mechanism);
     this.mechanismGroup = mechanism;
-
-    const collectorTemplate = lotteryScene.getObjectByName('Collector');
-    if (collectorTemplate) {
-      const collectorClone = collectorTemplate.clone(true);
-      collectorClone.scale.setScalar(scale);
-      collectorClone.rotation.y = Math.PI / 2;
-      collectorClone.position.set(0, -8.2, 0);
-      collectorClone.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.material = chromeMaterial;
-        }
-      });
-      this.machineRoot.add(collectorClone);
-    }
 
     const ballGroup = new THREE.Group();
     ballGroup.name = 'internal-ball-group';
@@ -723,7 +800,6 @@ export class BiomboEngineService {
   private createSecondaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-beta';
-    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x17191f);
 
     const drawnBalls: THREE.Object3D[] = [];
@@ -816,7 +892,6 @@ export class BiomboEngineService {
   private createTertiaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-gamma';
-    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0xc62828);
 
     const drawnBalls: THREE.Object3D[] = [];
@@ -909,7 +984,6 @@ export class BiomboEngineService {
   private createQuaternaryRig(config: BiomboConfig): void {
     const root = this.machineRoot.clone(true);
     root.name = 'biombo-machine-delta';
-    this.alignLotteryTable(root);
     this.setLotteryTableColor(root, 0x1565c0);
 
     const drawnBalls: THREE.Object3D[] = [];
@@ -1022,18 +1096,29 @@ export class BiomboEngineService {
     }
 
     table.traverse((object) => {
-      if (object.name !== 'Base' && object.name !== 'Back Wall') {
+      if (object.name !== 'Base') {
         return;
       }
-      const partColor = object.name === 'Back Wall' ? 0xf4f4f0 : color;
       object.traverse((part) => {
         if (!(part instanceof THREE.Mesh)) {
           return;
         }
+
+        const partName = part.name.toLowerCase();
+        if (
+          partName.includes('container') ||
+          partName.includes('plane') ||
+          partName.includes('cube') ||
+          partName.includes('collector') ||
+          partName.includes('switch')
+        ) {
+          return;
+        }
+
         const applyColor = (material: THREE.Material): THREE.Material => {
           const coloredMaterial = material.clone();
           if ('color' in coloredMaterial && coloredMaterial.color instanceof THREE.Color) {
-            coloredMaterial.color.setHex(partColor);
+            coloredMaterial.color.setHex(color);
           }
           return coloredMaterial;
         };
@@ -1262,7 +1347,7 @@ export class BiomboEngineService {
     ballStates.forEach((ballState, index) => {
       const col = index % numChutes;
       const row = Math.floor(index / numChutes);
-      const delay = row * 0.22 + (col % 2 === 0 ? 0.03 : 0.08) + Math.random() * 0.04;
+      const delay = row * 0.14 + (col % 2 === 0 ? 0.02 : 0.06) + Math.random() * 0.03;
       ballState.isDropping = true;
       ballState.dropDelay = delay;
       ballState.velocity.set(0, -18.0, 0);
@@ -1368,16 +1453,16 @@ export class BiomboEngineService {
   private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshPhysicalMaterial {
     return new THREE.MeshPhysicalMaterial({
       map: this.createBallNumberTexture(value, config),
-      roughness: 0.10,
-      metalness: 0.05,
-      clearcoatRoughness: 0.03,
-      reflectivity: 0.9,
-      envMap: this.backgroundTexture,
-      envMapIntensity: 0.75,
+      roughness: 0.08,
+      metalness: 0.03,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+      reflectivity: 0.95,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 0.95,
     });
   }
 
-  // ⭐ ROTACIÓN HACIA LA IZQUIERDA (-spinSpeed) PARA SINCRONIZAR CON LA FÍSICA
   private stepRigMechanics(
     state: BiomboState,
     drumGroup: THREE.Group | undefined,
@@ -1402,15 +1487,13 @@ export class BiomboEngineService {
       spinSpeed = 0.045;
     }
 
-    // ⭐ Giro hacia la izquierda (-spinSpeed)
     if (mechanismGroup) {
-      mechanismGroup.rotation.z -= spinSpeed;
+      mechanismGroup.rotation.z += spinSpeed;
     }
 
     return isShuffling ? spinSpeed : 0.014;
   }
 
-  // ⭐ FÍSICA DE LAS PELOTAS PRESERVADA AL 100%
   private stepRigBallPhysics(
     state: BiomboState,
     ballGroup: THREE.Group | undefined,
@@ -1465,9 +1548,9 @@ export class BiomboEngineService {
           const dRadial = bx * Math.cos(bladeTheta) + by * Math.sin(bladeTheta);
 
           if (dRadial > 0.8 && dRadial < 9.2) {
-            const dPerp = -bx * Math.sin(bladeTheta) + by * Math.cos(bladeTheta);
-            const nx = -Math.sin(bladeTheta);
-            const ny = Math.cos(bladeTheta);
+            const dPerp = bx * Math.sin(bladeTheta) - by * Math.cos(bladeTheta);
+            const nx = Math.sin(bladeTheta);
+            const ny = -Math.cos(bladeTheta);
 
             const collisionThreshold = ballState.radius + 0.42;
 
@@ -1495,7 +1578,7 @@ export class BiomboEngineService {
 
                 ball.rotation.x += (Math.random() - 0.5) * 3.0;
                 ball.rotation.y += (Math.random() - 0.5) * 3.0;
-                ball.rotation.z += spinSpeed * 5.0;
+                ball.rotation.z -= spinSpeed * 5.0;
               }
             }
           }
@@ -1687,7 +1770,7 @@ export class BiomboEngineService {
 
         if (progress < 0.65) {
           const rollSpeed = (1 - progress * 0.4) * 0.45;
-          anim.mesh.rotation.z -= rollSpeed;
+          anim.mesh.rotation.z += rollSpeed;
           anim.mesh.rotation.y += rollSpeed * 0.12;
           anim.mesh.rotation.x = -0.22 * progress;
         } else {
@@ -1697,14 +1780,8 @@ export class BiomboEngineService {
             anim.startRotX = anim.mesh.rotation.x;
 
             const currentZ = anim.mesh.rotation.z;
-            let targetZ = Math.floor(currentZ / (Math.PI * 2)) * (Math.PI * 2);
-
-            if (currentZ - targetZ < Math.PI * 0.9) {
-              targetZ -= Math.PI * 2;
-            }
-
-            const rampInclineAngleZ = -0.072;
-            anim.targetRotZ = targetZ + rampInclineAngleZ;
+            let targetZ = Math.round(currentZ / (Math.PI * 2)) * (Math.PI * 2);
+            anim.targetRotZ = targetZ;
           }
 
           const blend = (progress - 0.65) / 0.35;
@@ -1717,13 +1794,13 @@ export class BiomboEngineService {
 
           anim.mesh.rotation.z = THREE.MathUtils.lerp(startZ, targetZ, smoothBlend);
           anim.mesh.rotation.y = THREE.MathUtils.lerp(startY, -Math.PI / 2, smoothBlend);
-          anim.mesh.rotation.x = THREE.MathUtils.lerp(startX, -0.22, smoothBlend);
+          anim.mesh.rotation.x = THREE.MathUtils.lerp(startX, -0.15, smoothBlend);
         }
 
         if (progress >= 1) {
           anim.hasSettled = true;
           anim.mesh.position.copy(anim.targetSlotPos);
-          anim.mesh.rotation.set(-0.22, -Math.PI / 2, anim.targetRotZ || 0);
+          anim.mesh.rotation.set(-0.15, -Math.PI / 2, anim.targetRotZ || 0);
           anim.onSettled();
         }
       }
@@ -1741,14 +1818,14 @@ export class BiomboEngineService {
 
       if (this.cameraSequence === 'draw') {
         targetCamPos = new THREE.Vector3(
-          posX + 13.5 * scale,
-          posY - 5.5 * scale,
-          posZ + 38 * scale,
+          posX - 4.5 * scale,
+          posY - 4.5 * scale,
+          posZ + 32 * scale,
         );
         targetCamLook = new THREE.Vector3(
-          posX + 9 * scale,
-          posY - 10 * scale,
-          posZ,
+          posX - 4.5 * scale,
+          posY - 8.5 * scale,
+          posZ + 2.5 * scale,
         );
       } else {
         targetCamPos = new THREE.Vector3(
@@ -1974,49 +2051,116 @@ export class BiomboEngineService {
     agitationBalls: THREE.Mesh[],
     onSettled: () => void,
   ): void {
-    const ballRadius = 0.95;
+    const ballRadius = 0.92;
     const mesh = this.createNumberedBallMesh(ballNumber, config, ballRadius);
     mesh.userData['isDrawnBall'] = true;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.renderOrder = 50;
 
-    const endOfTrackX = 19;
-    const endOfTrackY = -12.40;
-    const endOfTrackZ = 0.90;
-    const ballSpacing = 2.15;
+    machineRoot.updateWorldMatrix(true, true);
 
-    const rampSlopeY = 0.072;
-    const rampSlopeZ = 0.015;
+    const table = machineRoot.getObjectByName('biombo-table-asset');
+    const tableAnchor = table?.getObjectByName('Circle005')
+      || table?.getObjectByName('Circle005_1')
+      || table?.getObjectByName('Back Panel');
 
-    const targetSlotX = endOfTrackX - (index * ballSpacing);
-    const deltaX = endOfTrackX - targetSlotX;
+    let tableOffsetX = 0;
+    let tableOffsetY = 0;
+    if (tableAnchor) {
+      const anchorCenter = machineRoot.worldToLocal(
+        new THREE.Box3().setFromObject(tableAnchor).getCenter(new THREE.Vector3()),
+      );
+      if (Number.isFinite(anchorCenter.x) && Number.isFinite(anchorCenter.y)) {
+        tableOffsetX = anchorCenter.x;
+        tableOffsetY = anchorCenter.y;
+      }
+    }
 
-    const targetSlotY = endOfTrackY + (deltaX * rampSlopeY);
-    const targetSlotZ = endOfTrackZ - (deltaX * rampSlopeZ);
+    let targetZ = 3.8;
+    let targetY = -7.6 + tableOffsetY;
+    let targetFirstX = -7.4 + tableOffsetX;
+
+    const containerObj = machineRoot.getObjectByName('Container_2') || machineRoot.getObjectByName('Container_1');
+    const baseObj = machineRoot.getObjectByName('Base');
+
+    if (containerObj) {
+      const cBox = new THREE.Box3().setFromObject(containerObj);
+      const cMax = machineRoot.worldToLocal(cBox.max.clone());
+      const cMin = machineRoot.worldToLocal(cBox.min.clone());
+      const cCenter = machineRoot.worldToLocal(cBox.getCenter(new THREE.Vector3()));
+
+      if (Number.isFinite(cMax.y) && Number.isFinite(cMin.y)) {
+        targetY = cMax.y + ballRadius * 0.25;
+        targetZ = Math.max(cCenter.z + 0.45, cMax.z - 0.4);
+        targetFirstX = Math.min(-6.6 + tableOffsetX, cMin.x + 1.35);
+      }
+    } else if (baseObj) {
+      const bBox = new THREE.Box3().setFromObject(baseObj);
+      const bMax = machineRoot.worldToLocal(bBox.max.clone());
+      if (Number.isFinite(bMax.y)) {
+        targetY = bMax.y + ballRadius + 0.2;
+        targetZ = 3.6;
+      }
+    }
+
+    const ballSpacing = 2.05;
+    const targetSlotX = targetFirstX + (index * ballSpacing);
+    const targetSlotY = targetY;
+    const targetSlotZ = targetZ;
     const targetSlotPos = new THREE.Vector3(targetSlotX, targetSlotY, targetSlotZ);
 
-    const pStart = new THREE.Vector3(0, -8.2, 0.2);
-    const pDrop = new THREE.Vector3(0.1, -9.8, 0.60);
+    const collectorObj = machineRoot.getObjectByName('Collector');
+    const switchObj = machineRoot.getObjectByName('Switch');
 
-    const rampEntryX = 0.4;
-    const pRampEntry = new THREE.Vector3(
-      rampEntryX,
-      endOfTrackY + (endOfTrackX - rampEntryX) * rampSlopeY,
-      endOfTrackZ - (endOfTrackX - rampEntryX) * rampSlopeZ,
-    );
+    let colCenter = new THREE.Vector3(tableOffsetX, -8.8 + tableOffsetY, 1.2);
+    let colMin = new THREE.Vector3(tableOffsetX - 0.8, -9.4 + tableOffsetY, 0.4);
+    let colMax = new THREE.Vector3(tableOffsetX + 0.8, -8.2 + tableOffsetY, 2.0);
+    if (collectorObj) {
+      const colBox = new THREE.Box3().setFromObject(collectorObj);
+      colMin = machineRoot.worldToLocal(colBox.min.clone());
+      colMax = machineRoot.worldToLocal(colBox.max.clone());
+      colCenter = machineRoot.worldToLocal(colBox.getCenter(new THREE.Vector3()));
+    }
 
-    const midX = Math.max(0.7, targetSlotX * 0.5);
-    const pRampMid = new THREE.Vector3(
-      midX,
-      endOfTrackY + (endOfTrackX - midX) * rampSlopeY,
-      endOfTrackZ - (endOfTrackX - midX) * rampSlopeZ,
+    let swMaxY = targetSlotY - ballRadius * 0.6;
+    let swCenterZ = Math.max(2.2, targetSlotZ - 0.8);
+    if (switchObj) {
+      const swBox = new THREE.Box3().setFromObject(switchObj);
+      const swMax = machineRoot.worldToLocal(swBox.max.clone());
+      const swCenter = machineRoot.worldToLocal(swBox.getCenter(new THREE.Vector3()));
+      if (Number.isFinite(swMax.y) && Number.isFinite(swCenter.z)) {
+        swMaxY = swMax.y;
+        swCenterZ = swCenter.z;
+      }
+    }
+
+    const chuteFloorBallY = switchObj
+      ? swMaxY + ballRadius * 0.85
+      : targetSlotY + 0.25;
+    const portalBallY = collectorObj
+      ? Math.max(chuteFloorBallY + 0.15, Math.min(colMin.y - ballRadius * 0.2, colCenter.y - ballRadius * 0.35))
+      : -9.2 + tableOffsetY;
+
+    const entryX = colCenter.x - 0.8;
+    const pStart = new THREE.Vector3(
+      colCenter.x,
+      portalBallY,
+      collectorObj ? (colMin.z + colCenter.z) * 0.5 : 0.4,
     );
+    const pCollector = new THREE.Vector3(
+      colCenter.x - 0.08,
+      chuteFloorBallY + 0.1,
+      collectorObj ? (colMax.z + swCenterZ) * 0.5 : Math.max(2.2, targetSlotZ - 0.8),
+    );
+    const pEntry = new THREE.Vector3(entryX, targetSlotY + 0.25, targetSlotZ);
+    const pMid = new THREE.Vector3((targetSlotX + entryX) * 0.5, targetSlotY + 0.12, targetSlotZ);
 
     const curve = new THREE.CatmullRomCurve3([
       pStart,
-      pDrop,
-      pRampEntry,
-      pRampMid,
+      pCollector,
+      pEntry,
+      pMid,
       targetSlotPos,
     ]);
 
@@ -2033,6 +2177,7 @@ export class BiomboEngineService {
       duration: 1.85,
       curve,
       targetSlotPos,
+      railInclineAngleZ: -0.05,
       ballNumber,
       hasSettled: false,
       onSettled,
