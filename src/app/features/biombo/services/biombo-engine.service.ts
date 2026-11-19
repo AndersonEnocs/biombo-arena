@@ -34,7 +34,6 @@ type SecondaryBiomboRig = {
   config: BiomboConfig;
   root: THREE.Group;
   drumGroup: THREE.Group;
-  rotationShaftGroup: THREE.Group;
   mechanismGroup: THREE.Group;
   ballGroup?: THREE.Group;
   agitationBalls: THREE.Mesh[];
@@ -88,7 +87,6 @@ export class BiomboEngineService {
   private quaternaryDrawTimers: number[] = [];
   private ballEffects: BallExitAnimation[] = [];
   private drumGroup?: THREE.Group;
-  private mainRotationShaftGroup?: THREE.Group;
   private mechanismGroup?: THREE.Group;
   private ballGroup?: THREE.Group;
   public mainRotationAngle = 0;
@@ -153,7 +151,7 @@ export class BiomboEngineService {
     this.clearBallEffects();
 
     try {
-      const rapier = await (this.rapierLoader as any).getRapier?.() ?? await (this.rapierLoader as any).load?.();
+      await ((this.rapierLoader as any).getRapier?.() ?? (this.rapierLoader as any).load?.());
 
       const width = container.clientWidth || window.innerWidth;
       const height = container.clientHeight || window.innerHeight;
@@ -202,16 +200,19 @@ export class BiomboEngineService {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.renderer.toneMappingExposure = 1.32;
+      this.renderer.toneMappingExposure = 1.18;
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
       container.replaceChildren(this.renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.82);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.52);
       this.scene.add(ambientLight);
 
-      const mainLight = new THREE.DirectionalLight(0xffffff, 2.1);
+      const hemisphereLight = new THREE.HemisphereLight(0xdbeeff, 0x1c2028, 0.55);
+      this.scene.add(hemisphereLight);
+
+      const mainLight = new THREE.DirectionalLight(0xffffff, 2.2);
       mainLight.position.set(16, 32, 28);
       mainLight.castShadow = true;
       mainLight.shadow.mapSize.width = 2048;
@@ -222,15 +223,15 @@ export class BiomboEngineService {
       mainLight.shadow.normalBias = 0.02;
       this.scene.add(mainLight);
 
-      const frontFillLight = new THREE.DirectionalLight(0xffffff, 1.15);
+      const frontFillLight = new THREE.DirectionalLight(0xffffff, 0.85);
       frontFillLight.position.set(0, 12, 42);
       this.scene.add(frontFillLight);
 
-      const rimLightLeft = new THREE.PointLight(0x70b4ff, 22, 90);
+      const rimLightLeft = new THREE.PointLight(0x70b4ff, 26, 95);
       rimLightLeft.position.set(-26, 12, 12);
       this.scene.add(rimLightLeft);
 
-      const rimLightRight = new THREE.PointLight(0xffffff, 14, 90);
+      const rimLightRight = new THREE.PointLight(0xe6f2ff, 18, 95);
       rimLightRight.position.set(26, -8, 16);
       this.scene.add(rimLightRight);
 
@@ -238,30 +239,9 @@ export class BiomboEngineService {
       chamberGlowLight.position.set(0, 0, 0.5);
       this.scene.add(chamberGlowLight);
 
-      const glassMaterial = new THREE.MeshPhysicalMaterial({
-        color: 0xffffff,
-        metalness: 0.04,
-        roughness: 0.0,
-        transparent: true,
-        opacity: 0.20,
-        reflectivity: 1.0,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.01,
-        side: THREE.FrontSide,
-        depthWrite: false,
-        envMap: this.backgroundTexture ?? null,
-        envMapIntensity: 1.25,
-      });
+      const lotteryModel = await new GLTFLoader().loadAsync('/assets/loteria.glb');
 
-      const [hollow, lotteryModel] = await Promise.all([
-        new SolidEntity(rapier, glassMaterial).load('/assets/hollow_sphere.fbx'),
-        new GLTFLoader().loadAsync('/assets/loteria.glb'),
-      ]);
-
-      this.solids['hollow'] = hollow;
-
-      hollow.center(0);
-      this.buildDrumPivot(hollow);
+      this.buildDrumPivotFromGLTF(lotteryModel.scene);
 
       this.lotteryTableTemplates.clear();
       lotteryModel.scene.traverse((object) => {
@@ -479,11 +459,9 @@ export class BiomboEngineService {
   }
 
   private buildInternalMechanismFromGLTF(lotteryScene: THREE.Group): void {
-    const hollowMesh = this.solids['hollow']?.mesh;
-    if (!hollowMesh) {
+    if (!this.drumGroup) {
       return;
     }
-    hollowMesh.renderOrder = 10;
 
     const mechanism = new THREE.Group();
     mechanism.name = 'internal-mechanism';
@@ -504,21 +482,21 @@ export class BiomboEngineService {
     });
 
     const paddleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x66bb46,
-      emissive: 0x1f4c16,
-      emissiveIntensity: 0.42,
-      metalness: 0.88,
-      roughness: 0.2,
+      color: 0x454e5c,
+      emissive: 0x061b24,
+      emissiveIntensity: 0.35,
+      metalness: 0.92,
+      roughness: 0.16,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 1.15,
+      envMapIntensity: 1.45,
     });
 
     const chromeMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       metalness: 0.98,
-      roughness: 0.1,
+      roughness: 0.08,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 1.35,
+      envMapIntensity: 1.5,
     });
 
     const paddleTemplate = lotteryScene.getObjectByName('Paddle');
@@ -553,7 +531,7 @@ export class BiomboEngineService {
     agitatorAssembly.rotation.y = Math.PI / 2;
     mechanism.add(agitatorAssembly);
 
-    hollowMesh.add(mechanism);
+    this.drumGroup.add(mechanism);
     this.mechanismGroup = mechanism;
 
     const ballGroup = new THREE.Group();
@@ -841,7 +819,6 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -933,7 +910,6 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -1025,7 +1001,6 @@ export class BiomboEngineService {
       config,
       root,
       drumGroup,
-      rotationShaftGroup: new THREE.Group(),
       mechanismGroup,
       ballGroup,
       agitationBalls,
@@ -1218,6 +1193,34 @@ export class BiomboEngineService {
       root.updateMatrixWorld(true);
     }
 
+    if (this.state() === 'IDLE') {
+      this.stageBallsInChutes(this.machineRoot, this.agitationBalls, this.agitationBallStates, this.ballGroup);
+    }
+    if (this.secondaryRig && this.secondaryState() === 'IDLE') {
+      this.stageBallsInChutes(
+        this.secondaryRig.root,
+        this.secondaryRig.agitationBalls,
+        this.secondaryRig.agitationBallStates,
+        this.secondaryRig.ballGroup,
+      );
+    }
+    if (this.tertiaryRig && this.tertiaryState() === 'IDLE') {
+      this.stageBallsInChutes(
+        this.tertiaryRig.root,
+        this.tertiaryRig.agitationBalls,
+        this.tertiaryRig.agitationBallStates,
+        this.tertiaryRig.ballGroup,
+      );
+    }
+    if (this.quaternaryRig && this.quaternaryState() === 'IDLE') {
+      this.stageBallsInChutes(
+        this.quaternaryRig.root,
+        this.quaternaryRig.agitationBalls,
+        this.quaternaryRig.agitationBallStates,
+        this.quaternaryRig.ballGroup,
+      );
+    }
+
     if (this.backdropRoot) {
       this.backdropRoot.position.y = targetFloorY;
       this.backdropRoot.updateWorldMatrix(true, true);
@@ -1313,26 +1316,85 @@ export class BiomboEngineService {
   ): void {
     if (!balls || balls.length === 0) return;
 
+    machineRoot.updateWorldMatrix(true, true);
+
     const numChutes = 8;
-    const chuteWidth = 15;
-    const startX = -chuteWidth / 2;
-    const stepX = chuteWidth / (numChutes - 1);
     const ballRadius = ballStates[0]?.radius || 0.92;
-    const chuteDepth = -ballRadius * 1.5;
     const rowSpacing = ballRadius * 2.1;
+
+    const table = machineRoot.getObjectByName('biombo-table-asset');
+    const tableAnchor = table?.getObjectByName('Circle005')
+      || table?.getObjectByName('Circle005_1')
+      || table?.getObjectByName('Back Panel');
+
+    let tableOffsetX = 0;
+    let tableOffsetY = 0;
+    if (tableAnchor) {
+      const anchorCenter = machineRoot.worldToLocal(
+        new THREE.Box3().setFromObject(tableAnchor).getCenter(new THREE.Vector3()),
+      );
+      if (Number.isFinite(anchorCenter.x) && Number.isFinite(anchorCenter.y)) {
+        tableOffsetX = anchorCenter.x;
+        tableOffsetY = anchorCenter.y;
+      }
+    }
+
+    const holderObj = machineRoot.getObjectByName('Ball Holder');
+    const holderGlassObj = machineRoot.getObjectByName('Ball Holder Glass');
+
+    let firstColX = tableOffsetX - 7.5;
+    let stepX = 15 / (numChutes - 1);
+    const baseY = 11.2 + tableOffsetY;
+    let chuteDepth = -ballRadius * 1.5;
+    const chuteExitY = 9.8 + tableOffsetY;
+
+    if (holderObj) {
+      const holderBox = new THREE.Box3().setFromObject(holderObj);
+      const holderMin = machineRoot.worldToLocal(holderBox.min.clone());
+      const holderMax = machineRoot.worldToLocal(holderBox.max.clone());
+      const holderCenter = machineRoot.worldToLocal(holderBox.getCenter(new THREE.Vector3()));
+
+      if (
+        Number.isFinite(holderMin.x) &&
+        Number.isFinite(holderMax.x) &&
+        Number.isFinite(holderMin.z) &&
+        Number.isFinite(holderMax.z)
+      ) {
+        const innerWidth = (holderMax.x - holderMin.x) * 0.93;
+        const colWidth = innerWidth / numChutes;
+        firstColX = holderCenter.x - innerWidth * 0.5 + colWidth * 0.5;
+        stepX = colWidth;
+
+        let frontZ = holderMax.z;
+        if (holderGlassObj) {
+          const glassBox = new THREE.Box3().setFromObject(holderGlassObj);
+          const glassMax = machineRoot.worldToLocal(glassBox.max.clone());
+          if (Number.isFinite(glassMax.z)) {
+            frontZ = Math.min(holderMax.z, glassMax.z);
+          }
+        }
+
+        const minSafeZ = holderMin.z + ballRadius * 0.92;
+        const maxSafeZ = frontZ - ballRadius * 1.05;
+        chuteDepth = maxSafeZ >= minSafeZ
+          ? (minSafeZ + maxSafeZ) * 0.5
+          : Math.max(minSafeZ, holderCenter.z);
+      }
+    }
 
     for (let index = 0; index < balls.length; index++) {
       const ball = balls[index];
       const col = index % numChutes;
       const row = Math.floor(index / numChutes);
 
-      const x = startX + col * stepX;
-      const y = 11.2 + row * rowSpacing;
+      const x = firstColX + col * stepX;
+      const y = baseY + row * rowSpacing;
       const z = chuteDepth;
 
       ball.position.set(x, y, z);
       ball.rotation.set(0, 0, 0);
       ball.visible = true;
+      ball.userData['chuteExitY'] = chuteExitY;
 
       if (ballStates[index]) {
         ballStates[index].velocity.set(0, 0, 0);
@@ -1354,48 +1416,112 @@ export class BiomboEngineService {
     });
   }
 
-  private buildDrumPivot(hollow: SolidEntity): void {
+  private buildDrumPivotFromGLTF(lotteryScene: THREE.Group): void {
     const pivot = new THREE.Group();
     pivot.name = 'sphere-rotation-pivot';
     pivot.position.copy(this.rotationCenter);
 
     const sphereAssembly = new THREE.Group();
     sphereAssembly.name = 'rotating-sphere-assembly';
-    const bounds = new THREE.Box3();
-    hollow.meshes.forEach((mesh) => {
-      mesh.updateMatrixWorld(true);
-      bounds.expandByObject(mesh);
+
+    const scale = 0.92 / 0.079;
+    const centerOffset = new THREE.Vector3(0.02, 3.03, 0.0);
+
+    const chamberObjects = new Map<string, THREE.Object3D>();
+    lotteryScene.traverse((object) => {
+      const normalized = object.name.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      if (normalized === 'chamberglassbody' && !chamberObjects.has('Chamber_Glass_Body')) {
+        chamberObjects.set('Chamber_Glass_Body', object);
+      } else if (normalized === 'chamberglassfront' && !chamberObjects.has('Chamber_Glass_Front')) {
+        chamberObjects.set('Chamber_Glass_Front', object);
+      }
     });
-    const meshCenter = bounds.getCenter(new THREE.Vector3());
+
+    const curvedGlassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xdbeeff,
+      metalness: 0.05,
+      roughness: 0.02,
+      transparent: true,
+      opacity: 0.16,
+      ior: 1.52,
+      reflectivity: 1.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.01,
+      side: THREE.FrontSide,
+      depthWrite: false,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.85,
+    });
+
+    const frontGlassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0.02,
+      roughness: 0.0,
+      transparent: true,
+      opacity: 0.07,
+      ior: 1.52,
+      reflectivity: 1.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.01,
+      side: THREE.FrontSide,
+      depthWrite: false,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 1.45,
+    });
+
+    const frontRimMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xeaf4ff,
+      metalness: 0.25,
+      roughness: 0.05,
+      transparent: true,
+      opacity: 0.34,
+      ior: 1.52,
+      reflectivity: 1.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.01,
+      side: THREE.FrontSide,
+      depthWrite: false,
+      envMap: this.backgroundTexture ?? null,
+      envMapIntensity: 2.0,
+    });
+
+    const glassBodyTemplate = chamberObjects.get('Chamber_Glass_Body');
+    if (glassBodyTemplate) {
+      const clone = glassBodyTemplate.clone(true);
+      clone.position.sub(centerOffset);
+      clone.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.material = curvedGlassMaterial;
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          obj.renderOrder = 10;
+        }
+      });
+      sphereAssembly.add(clone);
+    }
+
+    const glassFrontTemplate = chamberObjects.get('Chamber_Glass_Front');
+    if (glassFrontTemplate) {
+      const clone = glassFrontTemplate.clone(true);
+      clone.position.sub(centerOffset);
+      clone.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          const isRim = obj.name.includes('_1');
+          obj.material = isRim ? frontRimMaterial : frontGlassMaterial;
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          obj.renderOrder = isRim ? 12 : 11;
+        }
+      });
+      sphereAssembly.add(clone);
+    }
+
+    sphereAssembly.scale.setScalar(scale);
+    sphereAssembly.rotation.y = Math.PI / 2;
     pivot.add(sphereAssembly);
-    hollow.meshes.forEach((mesh) => sphereAssembly.attach(mesh));
-    sphereAssembly.position.copy(this.rotationCenter).sub(meshCenter);
+
     this.machineRoot.add(pivot);
     this.drumGroup = pivot;
-    this.buildMainRotationShaft();
-  }
-
-  private buildMainRotationShaft(): void {
-    const shaftAssembly = new THREE.Group();
-    shaftAssembly.name = 'central-rotation-shaft';
-    shaftAssembly.position.copy(this.rotationCenter);
-
-    const shaftMaterial = new THREE.MeshStandardMaterial({
-      color: 0x9098a2,
-      metalness: 0.95,
-      roughness: 0.25,
-      envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 1.0,
-    });
-
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 15.0, 24), shaftMaterial);
-    shaft.rotation.z = Math.PI / 2;
-    shaft.castShadow = true;
-    shaft.receiveShadow = true;
-    shaftAssembly.add(shaft);
-
-    this.machineRoot.add(shaftAssembly);
-    this.mainRotationShaftGroup = shaftAssembly;
   }
 
   private buildAgitationBalls(): void {
@@ -1453,20 +1579,19 @@ export class BiomboEngineService {
   private createNumberedBallMaterial(value: number, config: BiomboConfig): THREE.MeshPhysicalMaterial {
     return new THREE.MeshPhysicalMaterial({
       map: this.createBallNumberTexture(value, config),
-      roughness: 0.08,
-      metalness: 0.03,
+      roughness: 0.06,
+      metalness: 0.04,
       clearcoat: 1.0,
-      clearcoatRoughness: 0.02,
-      reflectivity: 0.95,
+      clearcoatRoughness: 0.015,
+      reflectivity: 1.0,
       envMap: this.backgroundTexture ?? null,
-      envMapIntensity: 0.95,
+      envMapIntensity: 1.15,
     });
   }
 
   private stepRigMechanics(
     state: BiomboState,
     drumGroup: THREE.Group | undefined,
-    shaftGroup: THREE.Group | undefined,
     mechanismGroup: THREE.Group | undefined,
     stateRef: { mainRotationAngle: number; mechanismBias: number },
   ): number {
@@ -1475,9 +1600,6 @@ export class BiomboEngineService {
 
     if (drumGroup) {
       drumGroup.rotation.set(0, 0, 0);
-    }
-    if (shaftGroup) {
-      shaftGroup.rotation.set(0, 0, 0);
     }
 
     let spinSpeed = 0.014;
@@ -1524,9 +1646,18 @@ export class BiomboEngineService {
           return;
         }
 
+        const chuteExitY = typeof ball.userData['chuteExitY'] === 'number'
+          ? ball.userData['chuteExitY']
+          : 9.8;
+
         velocity.y -= 140.0 * deltaSeconds;
-        velocity.x += -ball.position.x * 2.5 * deltaSeconds;
-        velocity.z += -ball.position.z * 2.5 * deltaSeconds;
+        if (ball.position.y <= chuteExitY) {
+          velocity.x += -ball.position.x * 3.5 * deltaSeconds;
+          velocity.z += -ball.position.z * 18.0 * deltaSeconds;
+        } else {
+          velocity.x = 0;
+          velocity.z = 0;
+        }
         ball.position.addScaledVector(velocity, deltaSeconds);
 
         if (ball.position.y < -2.0) {
@@ -1688,7 +1819,6 @@ export class BiomboEngineService {
     const alphaSpeed = this.stepRigMechanics(
       this.state(),
       this.drumGroup,
-      this.mainRotationShaftGroup,
       this.mechanismGroup,
       this,
     );
@@ -1705,7 +1835,6 @@ export class BiomboEngineService {
       const secSpeed = this.stepRigMechanics(
         this.secondaryState(),
         this.secondaryRig.drumGroup,
-        this.secondaryRig.rotationShaftGroup,
         this.secondaryRig.mechanismGroup,
         this.secondaryRig,
       );
@@ -1723,7 +1852,6 @@ export class BiomboEngineService {
       const terSpeed = this.stepRigMechanics(
         this.tertiaryState(),
         this.tertiaryRig.drumGroup,
-        this.tertiaryRig.rotationShaftGroup,
         this.tertiaryRig.mechanismGroup,
         this.tertiaryRig,
       );
@@ -1741,7 +1869,6 @@ export class BiomboEngineService {
       const quatSpeed = this.stepRigMechanics(
         this.quaternaryState(),
         this.quaternaryRig.drumGroup,
-        this.quaternaryRig.rotationShaftGroup,
         this.quaternaryRig.mechanismGroup,
         this.quaternaryRig,
       );
@@ -2106,7 +2233,7 @@ export class BiomboEngineService {
 
     const ballSpacing = 2.05;
     const targetSlotX = targetFirstX + (index * ballSpacing);
-    const targetSlotY = targetY;
+    const targetSlotY = targetY - 0.65;
     const targetSlotZ = targetZ;
     const targetSlotPos = new THREE.Vector3(targetSlotX, targetSlotY, targetSlotZ);
 
