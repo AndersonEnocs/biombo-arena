@@ -179,32 +179,32 @@ export class HomePage {
   public biomboAlfa: BiomboConfig = {
     id: 'biombo-alfa',
     title: 'BIOMBO ALFA',
-    ballAmount: 30,
-    resultCount: 3,
+    ballAmount: 10,
+    resultCount: 1,
     ballType: 'color',
   };
 
   public biomboBeta: BiomboConfig = {
     id: 'biombo-beta',
     title: 'BIOMBO BETA',
-    ballAmount: 30,
-    resultCount: 3,
+    ballAmount: 10,
+    resultCount: 1,
     ballType: 'yellow',
   };
 
   public biomboGamma: BiomboConfig = {
     id: 'biombo-gamma',
     title: 'BIOMBO GAMMA',
-    ballAmount: 30,
-    resultCount: 3,
+    ballAmount: 10,
+    resultCount: 1,
     ballType: 'color',
   };
 
   public biomboDelta: BiomboConfig = {
     id: 'biombo-delta',
     title: 'BIOMBO DELTA',
-    ballAmount: 30,
-    resultCount: 3,
+    ballAmount: 10,
+    resultCount: 1,
     ballType: 'yellow',
   };
 }

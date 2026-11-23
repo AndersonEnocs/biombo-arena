@@ -2,33 +2,30 @@ import { describe, expect, it } from 'vitest';
 import { generateBiomboResults } from './biombo.interfaces';
 
 describe('generateBiomboResults', () => {
-    it('genera exactamente 3 bolas únicas dentro del rango configurado', () => {
+    it('genera exactamente una bola dentro del rango 0 a 9', () => {
         const result = generateBiomboResults({
-            ballAmount: 30,
-            resultCount: 3,
+            ballAmount: 10,
+            resultCount: 1,
             ballType: 'color',
             id: 'demo',
             title: 'demo',
         });
 
-        expect(result).toHaveLength(3);
-        expect(new Set(result).size).toBe(3);
-        result.forEach((value) => {
-            expect(value).toBeGreaterThanOrEqual(1);
-            expect(value).toBeLessThanOrEqual(30);
-        });
+        expect(result).toHaveLength(1);
+        expect(result[0]).toBeGreaterThanOrEqual(0);
+        expect(result[0]).toBeLessThanOrEqual(9);
     });
 
     it('usa resultados personalizados si los recibe', () => {
         const result = generateBiomboResults({
-            ballAmount: 30,
-            resultCount: 3,
+            ballAmount: 10,
+            resultCount: 1,
             ballType: 'yellow',
             id: 'demo',
             title: 'demo',
-            customResult: [12, 5, 29],
+            customResult: [7],
         });
 
-        expect(result).toEqual([5, 12, 29]);
+        expect(result).toEqual([7]);
     });
 });

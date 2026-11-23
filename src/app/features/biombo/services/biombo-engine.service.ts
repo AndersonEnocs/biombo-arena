@@ -1133,7 +1133,7 @@ export class BiomboEngineService {
       this.quaternaryRig.root.scale.setScalar(scale);
       this.quaternaryRig.root.position.set(frontHorizontalSeparation, -verticalSeparation + biomboElevation, depthSeparation);
 
-      this.baseCameraPosition.set(0, 0, portrait ? 76 : 68);
+      this.baseCameraPosition.set(0, 0, portrait ? 54 : 48);
       targetFloorY = -verticalSeparation + biomboElevation - floorClearance * scale;
     } else if (this.tertiaryRig) {
       const scale = portrait ? 0.34 : 0.42;
@@ -1144,7 +1144,7 @@ export class BiomboEngineService {
       this.secondaryRig?.root.position.set(0, biomboElevation, 0);
       this.tertiaryRig.root.scale.setScalar(scale);
       this.tertiaryRig.root.position.set(portrait ? 0 : separation, (portrait ? -separation : 0) + biomboElevation, 0);
-      this.baseCameraPosition.set(0, 0, portrait ? 70 : 64);
+      this.baseCameraPosition.set(0, 0, portrait ? 50 : 46);
 
       const lowestY = (portrait ? -separation : 0) + biomboElevation;
       targetFloorY = lowestY - floorClearance * scale;
@@ -1163,14 +1163,14 @@ export class BiomboEngineService {
       this.secondaryRig.root.scale.setScalar(scale);
       this.secondaryRig.root.position.set(biombo2_X, biombo2_Y, 0);
 
-      this.baseCameraPosition.set(0, 0, portrait ? 67 : 61);
+      this.baseCameraPosition.set(0, 0, portrait ? 48 : 44);
 
       const lowestY = (portrait ? -12.0 : 0.0) + biomboElevation;
       targetFloorY = lowestY - floorClearance * scale;
     } else {
       this.machineRoot.scale.setScalar(1);
       this.machineRoot.position.set(0, biomboElevation, 0);
-      this.baseCameraPosition.set(0, 0, 110.88);
+      this.baseCameraPosition.set(0, 0, 80);
       targetFloorY = biomboElevation - floorClearance;
     }
 
@@ -1540,12 +1540,12 @@ export class BiomboEngineService {
     this.agitationBallStates = [];
     this.scene.updateMatrixWorld(true);
 
-    const total = 24;
+    const total = 10;
     for (let index = 0; index < total; index++) {
       const ballRadius = 0.92;
-      const ball = this.createNumberedBallMesh(index + 1, this.config, ballRadius);
+      const ball = this.createNumberedBallMesh(index, this.config, ballRadius);
       ball.name = `agitation-ball-${index}`;
-      ball.userData['ballNumber'] = index + 1;
+      ball.userData['ballNumber'] = index;
       ball.castShadow = true;
       ball.receiveShadow = true;
       ball.renderOrder = 3;
@@ -1566,7 +1566,8 @@ export class BiomboEngineService {
 
   private applyAgitationBallAppearance(balls: THREE.Mesh[], config: BiomboConfig): void {
     balls.forEach((ball, index) => {
-      const value = Number(ball.userData['ballNumber']) || index + 1;
+      const storedValue = Number(ball.userData['ballNumber']);
+      const value = Number.isFinite(storedValue) ? storedValue : index;
       ball.material = this.createNumberedBallMaterial(value, config);
     });
   }
@@ -2321,7 +2322,7 @@ export class BiomboEngineService {
     }
 
     const isYellow = config.ballType === 'yellow';
-    const baseColor = isYellow ? '#ffd200' : this.agitationPalette[(value - 1) % this.agitationPalette.length];
+    const baseColor = isYellow ? '#ffd200' : this.agitationPalette[value % this.agitationPalette.length];
 
     ctx.fillStyle = typeof baseColor === 'number' ? `#${baseColor.toString(16).padStart(6, '0')}` : baseColor;
     ctx.fillRect(0, 0, 1024, 1024);

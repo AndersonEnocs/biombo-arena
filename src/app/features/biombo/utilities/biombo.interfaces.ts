@@ -19,13 +19,13 @@ export interface BiomboEventPayload {
 }
 
 export function generateBiomboResults(config: BiomboConfig): number[] {
-  const safeCount = Math.max(1, Math.min(config.resultCount || 1, config.ballAmount || 1));
+  const safeCount = 1;
   const custom = Array.isArray(config.customResult) ? config.customResult.slice() : [];
 
   if (custom.length > 0) {
     const normalized = custom
       .map((value) => Math.round(Number(value)))
-      .filter((value) => Number.isFinite(value) && value >= 1 && value <= config.ballAmount)
+      .filter((value) => Number.isFinite(value) && value >= 0 && value <= 9)
       .slice(0, safeCount);
 
     if (normalized.length === safeCount) {
@@ -33,7 +33,7 @@ export function generateBiomboResults(config: BiomboConfig): number[] {
     }
   }
 
-  const pool = Array.from({ length: config.ballAmount }, (_, index) => index + 1);
+  const pool = Array.from({ length: 10 }, (_, index) => index);
   const draws: number[] = [];
 
   while (draws.length < safeCount && pool.length > 0) {
