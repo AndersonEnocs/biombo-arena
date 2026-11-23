@@ -97,6 +97,16 @@ export class BiomboEngineService {
   private lastAgitationFrame = 0;
   private readonly shuffleDurationMs = 8000;
   private readonly rotationCenter = new THREE.Vector3(0, 0, 0);
+  private chamberMetrics = {
+    radius: 11.8,
+    frontZ: 4.5,
+    backZ: -7.5,
+    paddleRadius: 11.2,
+    paddleMinZ: -3.8,
+    paddleMaxZ: 3.8,
+    paddleCenterZ: 0,
+    paddleBaseAngle: 0,
+  };
 
   private baseCameraPosition = new THREE.Vector3(0, 0, 48);
   private baseCameraTarget = new THREE.Vector3(0, 0, 0);
@@ -507,13 +517,15 @@ export class BiomboEngineService {
     const centerOffset = new THREE.Vector3(0.02, 3.03, 0.0);
 
     const parts = [
-      { tmpl: paddleTemplate, mat: paddleMaterial },
-      { tmpl: paddleRingTemplate, mat: neonRingMaterial },
-      { tmpl: paddleAxleTemplate, mat: chromeMaterial },
-      { tmpl: paddleEndTemplate, mat: chromeMaterial },
+      { tmpl: paddleTemplate, mat: paddleMaterial, isArm: true },
+      { tmpl: paddleRingTemplate, mat: neonRingMaterial, isArm: false },
+      { tmpl: paddleAxleTemplate, mat: chromeMaterial, isArm: false },
+      { tmpl: paddleEndTemplate, mat: chromeMaterial, isArm: false },
     ];
 
-    parts.forEach(({ tmpl, mat }) => {
+    let paddleArmClone: THREE.Object3D | undefined;
+
+    parts.forEach(({ tmpl, mat, isArm }) => {
       if (!tmpl) return;
       const clone = tmpl.clone(true);
       clone.position.sub(centerOffset);
@@ -524,6 +536,9 @@ export class BiomboEngineService {
           obj.receiveShadow = true;
         }
       });
+      if (isArm) {
+        paddleArmClone = clone;
+      }
       agitatorAssembly.add(clone);
     });
 
@@ -533,6 +548,49 @@ export class BiomboEngineService {
 
     this.drumGroup.add(mechanism);
     this.mechanismGroup = mechanism;
+
+    this.machineRoot.updateMatrixWorld(true);
+    const mechBox = new THREE.Box3().setFromObject(agitatorAssembly);
+    const mMin = this.machineRoot.worldToLocal(mechBox.min.clone());
+    const mMax = this.machineRoot.worldToLocal(mechBox.max.clone());
+    const mCenter = this.machineRoot.worldToLocal(mechBox.getCenter(new THREE.Vector3()));
+    const paddleR = Math.max(
+      Math.abs(mMin.x),
+      Math.abs(mMax.x),
+      Math.abs(mMin.y),
+      Math.abs(mMax.y),
+    );
+    if (Number.isFinite(paddleR) && paddleR > 4) {
+      this.chamberMetrics.paddleRadius = paddleR;
+    }
+    if (Number.isFinite(mMin.z) && Number.isFinite(mMax.z) && Number.isFinite(mCenter.z)) {
+      this.chamberMetrics.paddleMinZ = mMin.z;
+      this.chamberMetrics.paddleMaxZ = mMax.z;
+      this.chamberMetrics.paddleCenterZ = mCenter.z;
+    }
+
+    const angleSource = paddleArmClone ?? agitatorAssembly;
+    let maxTipDistSq = 0;
+    let tipAngle = 0;
+    angleSource.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      const posAttr = obj.geometry.getAttribute('position');
+      if (!posAttr) return;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < posAttr.count; i++) {
+        v.fromBufferAttribute(posAttr, i);
+        obj.localToWorld(v);
+        this.machineRoot.worldToLocal(v);
+        const dSq = v.x * v.x + v.y * v.y;
+        if (dSq > maxTipDistSq) {
+          maxTipDistSq = dSq;
+          tipAngle = Math.atan2(v.y, v.x);
+        }
+      }
+    });
+    if (maxTipDistSq > 16) {
+      this.chamberMetrics.paddleBaseAngle = tipAngle;
+    }
 
     const ballGroup = new THREE.Group();
     ballGroup.name = 'internal-ball-group';
@@ -1485,11 +1543,12 @@ export class BiomboEngineService {
       envMapIntensity: 2.0,
     });
 
+    let glassBodyClone: THREE.Object3D | undefined;
     const glassBodyTemplate = chamberObjects.get('Chamber_Glass_Body');
     if (glassBodyTemplate) {
-      const clone = glassBodyTemplate.clone(true);
-      clone.position.sub(centerOffset);
-      clone.traverse((obj) => {
+      glassBodyClone = glassBodyTemplate.clone(true);
+      glassBodyClone.position.sub(centerOffset);
+      glassBodyClone.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.material = curvedGlassMaterial;
           obj.castShadow = false;
@@ -1497,14 +1556,15 @@ export class BiomboEngineService {
           obj.renderOrder = 10;
         }
       });
-      sphereAssembly.add(clone);
+      sphereAssembly.add(glassBodyClone);
     }
 
+    let glassFrontClone: THREE.Object3D | undefined;
     const glassFrontTemplate = chamberObjects.get('Chamber_Glass_Front');
     if (glassFrontTemplate) {
-      const clone = glassFrontTemplate.clone(true);
-      clone.position.sub(centerOffset);
-      clone.traverse((obj) => {
+      glassFrontClone = glassFrontTemplate.clone(true);
+      glassFrontClone.position.sub(centerOffset);
+      glassFrontClone.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           const isRim = obj.name.includes('_1');
           obj.material = isRim ? frontRimMaterial : frontGlassMaterial;
@@ -1513,7 +1573,7 @@ export class BiomboEngineService {
           obj.renderOrder = isRim ? 12 : 11;
         }
       });
-      sphereAssembly.add(clone);
+      sphereAssembly.add(glassFrontClone);
     }
 
     sphereAssembly.scale.setScalar(scale);
@@ -1522,6 +1582,30 @@ export class BiomboEngineService {
 
     this.machineRoot.add(pivot);
     this.drumGroup = pivot;
+
+    this.machineRoot.updateMatrixWorld(true);
+    if (glassBodyClone) {
+      const glassBox = new THREE.Box3().setFromObject(glassBodyClone);
+      const gMin = this.machineRoot.worldToLocal(glassBox.min.clone());
+      const gMax = this.machineRoot.worldToLocal(glassBox.max.clone());
+      const measuredRadius = Math.max((gMax.x - gMin.x) * 0.5, (gMax.y - gMin.y) * 0.5);
+      if (Number.isFinite(measuredRadius) && measuredRadius > 5) {
+        this.chamberMetrics.radius = measuredRadius * 0.96;
+      }
+      if (Number.isFinite(gMin.z)) {
+        this.chamberMetrics.backZ = gMin.z;
+      }
+      if (Number.isFinite(gMax.z)) {
+        this.chamberMetrics.frontZ = gMax.z;
+      }
+    }
+    if (glassFrontClone) {
+      const frontBox = new THREE.Box3().setFromObject(glassFrontClone);
+      const fCenter = this.machineRoot.worldToLocal(frontBox.getCenter(new THREE.Vector3()));
+      if (Number.isFinite(fCenter.z)) {
+        this.chamberMetrics.frontZ = fCenter.z;
+      }
+    }
   }
 
   private buildAgitationBalls(): void {
@@ -1632,7 +1716,10 @@ export class BiomboEngineService {
     const isShuffling = state === 'SHUFFLING';
     const isPicking = state === 'PICKING';
     const isRoundActive = isShuffling || isPicking;
-    const sphereRadius = 9.8;
+    const sphereRadius = this.chamberMetrics.radius;
+    const paddleRadius = this.chamberMetrics.paddleRadius;
+    const paddleCenterZ = this.chamberMetrics.paddleCenterZ;
+    const paddleBaseAngle = this.chamberMetrics.paddleBaseAngle;
 
     const paddleAngle = mechanismGroup ? mechanismGroup.rotation.z : 0;
     const omega = spinSpeed / Math.max(deltaSeconds, 0.001);
@@ -1653,8 +1740,8 @@ export class BiomboEngineService {
 
         velocity.y -= 140.0 * deltaSeconds;
         if (ball.position.y <= chuteExitY) {
-          velocity.x += -ball.position.x * 3.5 * deltaSeconds;
-          velocity.z += -ball.position.z * 18.0 * deltaSeconds;
+          velocity.x += -ball.position.x * 2.5 * deltaSeconds;
+          velocity.z += (paddleCenterZ - ball.position.z) * 18.0 * deltaSeconds;
         } else {
           velocity.x = 0;
           velocity.z = 0;
@@ -1673,20 +1760,30 @@ export class BiomboEngineService {
       const by = ball.position.y;
       const bz = ball.position.z;
       const ballDist = Math.sqrt(bx * bx + by * by);
+      const paddleMinZ = this.chamberMetrics.paddleMinZ - ballState.radius * 0.9;
+      const paddleMaxZ = this.chamberMetrics.paddleMaxZ + ballState.radius * 0.9;
 
-      if (ballDist > 0.8 && ballDist < 9.3 && Math.abs(bz) < 3.8) {
+      if (
+        ballDist > 0.6 &&
+        ballDist < paddleRadius + ballState.radius &&
+        bz >= paddleMinZ &&
+        bz <= paddleMaxZ
+      ) {
         for (let k = 0; k < 3; k++) {
-          const bladeTheta = paddleAngle + k * ((2 * Math.PI) / 3);
-          const dRadial = bx * Math.cos(bladeTheta) + by * Math.sin(bladeTheta);
+          const bladeTheta = paddleAngle + paddleBaseAngle + k * ((2 * Math.PI) / 3);
+          const cosT = Math.cos(bladeTheta);
+          const sinT = Math.sin(bladeTheta);
+          const dRadial = bx * cosT + by * sinT;
 
-          if (dRadial > 0.8 && dRadial < 9.2) {
-            const dPerp = bx * Math.sin(bladeTheta) - by * Math.cos(bladeTheta);
-            const nx = Math.sin(bladeTheta);
-            const ny = -Math.cos(bladeTheta);
+          if (dRadial > 0.6 && dRadial <= paddleRadius + ballState.radius * 0.35) {
+            const nx = -sinT;
+            const ny = cosT;
+            const dPerp = bx * nx + by * ny;
 
-            const collisionThreshold = ballState.radius + 0.42;
+            const isScoopZone = dRadial > paddleRadius * 0.72;
+            const collisionThreshold = ballState.radius + (isScoopZone ? 0.85 : 0.35);
 
-            if (dPerp > -0.4 && dPerp < collisionThreshold) {
+            if (dPerp > -0.45 && dPerp < collisionThreshold) {
               const bladeLinearSpeed = omega * dRadial;
               const bladeVx = nx * bladeLinearSpeed;
               const bladeVy = ny * bladeLinearSpeed;
@@ -1695,6 +1792,12 @@ export class BiomboEngineService {
               const relVy = bladeVy - velocity.y;
               const impactDot = relVx * nx + relVy * ny;
 
+              if (dPerp < ballState.radius * 0.85) {
+                const pushOut = ballState.radius * 0.85 - dPerp;
+                ball.position.x += nx * pushOut;
+                ball.position.y += ny * pushOut;
+              }
+
               if (impactDot > 0) {
                 const bounce = isShuffling ? 1.35 : (isPicking ? 1.1 : 0.6);
                 const impulse = Math.max(impactDot, isShuffling ? 15.0 : 5.0) * bounce;
@@ -1702,24 +1805,24 @@ export class BiomboEngineService {
                 velocity.x += nx * impulse;
                 velocity.y += ny * impulse;
 
-                if (dRadial > 5.0 && ball.position.y < -3.0) {
-                  const scoopLoft = isShuffling ? 28.0 : 14.0;
+                if (dRadial > paddleRadius * 0.58 && ball.position.y < -sphereRadius * 0.22) {
+                  const scoopLoft = isShuffling ? 26.0 : 12.0;
                   velocity.y += scoopLoft;
+                  velocity.x -= cosT * (isShuffling ? 6.0 : 2.5);
                   velocity.z += (Math.random() - 0.5) * (isShuffling ? 18.0 : 8.0);
                 }
 
                 ball.rotation.x += (Math.random() - 0.5) * 3.0;
                 ball.rotation.y += (Math.random() - 0.5) * 3.0;
-                ball.rotation.z -= spinSpeed * 5.0;
+                ball.rotation.z += spinSpeed * 5.0;
               }
             }
           }
         }
       }
 
-      if (ball.position.y < -5.5) {
-        velocity.x -= ball.position.x * (isRoundActive ? 12.0 : 25.0) * deltaSeconds;
-        velocity.z -= ball.position.z * (isRoundActive ? 12.0 : 25.0) * deltaSeconds;
+      if (ball.position.y < -sphereRadius * 0.45) {
+        velocity.z += (paddleCenterZ - ball.position.z) * (isRoundActive ? 10.0 : 22.0) * deltaSeconds;
       }
 
       const dragFactor = isRoundActive ? 0.990 : 0.95;
@@ -1727,12 +1830,12 @@ export class BiomboEngineService {
       velocity.z *= Math.pow(dragFactor, deltaSeconds * 60);
       velocity.y *= Math.pow(dragFactor, deltaSeconds * 60);
 
-      const maxSpeed = isShuffling ? 48.0 : 26.0;
+      const maxSpeed = isShuffling ? 52.0 : 28.0;
       if (velocity.lengthSq() > maxSpeed * maxSpeed) {
         velocity.setLength(maxSpeed);
       }
 
-      if (!isRoundActive && ball.position.y < -7.0) {
+      if (!isRoundActive && ball.position.y < -sphereRadius * 0.65) {
         velocity.multiplyScalar(Math.pow(0.5, deltaSeconds * 60));
         if (velocity.lengthSq() < 0.15) {
           velocity.set(0, 0, 0);
@@ -1748,7 +1851,7 @@ export class BiomboEngineService {
       const currentDistance = ball.position.length();
       const maxAllowedDistance = sphereRadius - ballState.radius;
 
-      if (currentDistance > maxAllowedDistance && ball.position.y < 7.5) {
+      if (currentDistance > maxAllowedDistance) {
         const normal = ball.position.clone().normalize();
         ball.position.copy(normal.clone().multiplyScalar(maxAllowedDistance));
         const dot = velocity.dot(normal);
@@ -1758,6 +1861,20 @@ export class BiomboEngineService {
           velocity.sub(normal.multiplyScalar((1 + wallBounce) * dot));
           velocity.x += (Math.random() - 0.5) * 1.5;
           velocity.z += (Math.random() - 0.5) * 1.5;
+        }
+      }
+
+      const frontWallZ = this.chamberMetrics.frontZ - ballState.radius;
+      const backWallZ = this.chamberMetrics.backZ + ballState.radius;
+      if (ball.position.z > frontWallZ) {
+        ball.position.z = frontWallZ;
+        if (velocity.z > 0) {
+          velocity.z *= -(isShuffling ? 0.75 : 0.45);
+        }
+      } else if (ball.position.z < backWallZ) {
+        ball.position.z = backWallZ;
+        if (velocity.z < 0) {
+          velocity.z *= -(isShuffling ? 0.75 : 0.45);
         }
       }
     });
