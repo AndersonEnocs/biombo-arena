@@ -5,12 +5,11 @@ import { BiomboCanvasComponent } from '../biombo-canvas/biombo-canvas.component'
 import { BiomboConfig } from '../../utilities/biombo.interfaces';
 import { BiomboEngineService } from '../../services/biombo-engine.service';
 import { BiomboResultBoard, BiomboResultsComponent } from '../biombo-results/biombo-results.component';
-import { BiomboSpeedControlComponent } from '../biombo-speed-control/biombo-speed-control.component';
 
 @Component({
   selector: 'app-biombo-card',
   standalone: true,
-  imports: [CommonModule, BiomboCanvasComponent, BiomboResultsComponent, BiomboSpeedControlComponent, IonButton, IonSpinner],
+  imports: [CommonModule, BiomboCanvasComponent, BiomboResultsComponent, IonButton, IonSpinner],
   providers: [BiomboEngineService],
   template: `
     <div class="biombo-stage-wrapper">
@@ -112,13 +111,6 @@ import { BiomboSpeedControlComponent } from '../biombo-speed-control/biombo-spee
 
       <!-- HUD Inferior Flotante: solo control de la ronda -->
       <div class="hud-bottom-dock">
-        <app-biombo-speed-control
-          [speedPercent]="engine.mechanismSpeedPercent()"
-          [minSpeedPercent]="engine.minMechanismSpeedPercent"
-          [maxSpeedPercent]="engine.maxMechanismSpeedPercent"
-          [disabled]="!engine.isReady() || !engine.canStartRound()"
-          (speedChange)="engine.setMechanismSpeedPercent($event)">
-        </app-biombo-speed-control>
         <ion-button
           class="cyber-action-btn"
           [disabled]="!engine.isReady() || !engine.canStartRound()"

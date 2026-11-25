@@ -48,9 +48,6 @@ type QuaternaryBiomboRig = SecondaryBiomboRig;
 
 @Injectable()
 export class BiomboEngineService {
-  public readonly minMechanismSpeedPercent = 10;
-  public readonly maxMechanismSpeedPercent = 150;
-  public readonly mechanismSpeedPercent = signal(100);
   public readonly isReady = signal(false);
   public readonly errorMessage = signal<string | null>(null);
   public readonly backgroundError = signal<string | null>(null);
@@ -130,16 +127,6 @@ export class BiomboEngineService {
 
   private readonly rapierLoader = inject(RapierLoaderService);
   private readonly ngZone = inject(NgZone);
-
-  public setMechanismSpeedPercent(value: number): void {
-    if (!Number.isFinite(value)) {
-      return;
-    }
-
-    this.mechanismSpeedPercent.set(
-      Math.min(this.maxMechanismSpeedPercent, Math.max(this.minMechanismSpeedPercent, Math.round(value))),
-    );
-  }
 
   public async initialize(
     container: HTMLElement,
@@ -1707,12 +1694,11 @@ export class BiomboEngineService {
       spinSpeed = 0.045;
     }
 
-    const speedMultiplier = isRoundActive ? this.mechanismSpeedPercent() / 100 : 1;
     if (mechanismGroup) {
-      mechanismGroup.rotation.z += spinSpeed * speedMultiplier;
+      mechanismGroup.rotation.z += spinSpeed;
     }
 
-    return (isShuffling ? spinSpeed : 0.014) * speedMultiplier;
+    return isShuffling ? spinSpeed : 0.014;
   }
 
   private stepRigBallPhysics(
