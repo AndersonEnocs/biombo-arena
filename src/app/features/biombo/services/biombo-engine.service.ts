@@ -48,7 +48,7 @@ type QuaternaryBiomboRig = SecondaryBiomboRig;
 
 @Injectable()
 export class BiomboEngineService {
-  public readonly minMechanismSpeedPercent = 50;
+  public readonly minMechanismSpeedPercent = 10;
   public readonly maxMechanismSpeedPercent = 150;
   public readonly mechanismSpeedPercent = signal(100);
   public readonly isReady = signal(false);

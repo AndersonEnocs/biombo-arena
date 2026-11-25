@@ -49,7 +49,7 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
 })
 export class BiomboSpeedControlComponent {
   @Input() speedPercent = 100;
-  @Input() minSpeedPercent = 50;
+  @Input() minSpeedPercent = 10;
   @Input() maxSpeedPercent = 150;
   @Input() disabled = false;
   @Output() speedChange = new EventEmitter<number>();
