@@ -180,7 +180,7 @@ export class HomePage {
     id: 'biombo-alfa',
     title: 'BIOMBO ALFA',
     ballAmount: 30,
-    resultCount: 3,
+    resultCount: 1,
     ballType: 'color',
   };
 
@@ -188,7 +188,7 @@ export class HomePage {
     id: 'biombo-beta',
     title: 'BIOMBO BETA',
     ballAmount: 30,
-    resultCount: 3,
+    resultCount: 1,
     ballType: 'yellow',
   };
 
@@ -196,7 +196,7 @@ export class HomePage {
     id: 'biombo-gamma',
     title: 'BIOMBO GAMMA',
     ballAmount: 30,
-    resultCount: 3,
+    resultCount: 1,
     ballType: 'color',
   };
 
@@ -204,7 +204,7 @@ export class HomePage {
     id: 'biombo-delta',
     title: 'BIOMBO DELTA',
     ballAmount: 30,
-    resultCount: 3,
+    resultCount: 1,
     ballType: 'yellow',
   };
 }

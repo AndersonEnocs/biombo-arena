@@ -105,7 +105,7 @@ import { BiomboResultBoard, BiomboResultsComponent } from '../biombo-results/bio
           }
         </div>
         <div class="round-info">
-          <span>RONDA: 3 BOLAS</span>
+          <span>RONDA: 1 BOLA</span>
         </div>
       </div>
 
