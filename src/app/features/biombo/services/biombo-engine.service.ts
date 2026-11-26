@@ -1687,18 +1687,18 @@ export class BiomboEngineService {
       drumGroup.rotation.set(0, 0, 0);
     }
 
-    let spinSpeed = 0.014;
+    let spinSpeed = 0;
     if (isShuffling) {
-      spinSpeed = 0.085;
+      spinSpeed = 0.085 / 3;
     } else if (isRoundActive) {
-      spinSpeed = 0.045;
+      spinSpeed = 0.045 / 3;
     }
 
     if (mechanismGroup) {
       mechanismGroup.rotation.z += spinSpeed;
     }
 
-    return isShuffling ? spinSpeed : 0.014;
+    return isRoundActive ? (isShuffling ? spinSpeed : 0.014) : 0;
   }
 
   private stepRigBallPhysics(
