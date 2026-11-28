@@ -1689,7 +1689,7 @@ export class BiomboEngineService {
 
     let spinSpeed = 0;
     if (isShuffling) {
-      spinSpeed = 0.085 / 3;
+      spinSpeed = 0.055 / 3; // velocidad aceptable de giro por los momentos debe ser baja para que las paletas no acumulen todas las esferas durante el tiro 
     } else if (isRoundActive) {
       spinSpeed = 0.045 / 3;
     }
